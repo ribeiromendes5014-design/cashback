@@ -8,7 +8,7 @@ CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03
 
-# --- Configuração Inicial e Funções de Carregamento/Salvamento ---
+# --- Configuração Inicial e Funções de Carregamento/Salvamento (Local CSV) ---
 
 def carregar_dados():
     """Tenta carregar os DataFrames a partir dos CSVs. Se não existirem, cria DataFrames vazios."""
@@ -22,10 +22,10 @@ def carregar_dados():
     else:
         st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
 
-    # Adiciona um cliente de exemplo se estiver vazio (ou cria o DF se for a primeira vez)
+    # Adiciona um cliente de exemplo se estiver vazio
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        salvar_dados() # Salva o cliente de exemplo
+        salvar_dados() 
             
     # Carregar Lançamentos
     if os.path.exists(LANÇAMENTOS_CSV):
@@ -43,13 +43,68 @@ def salvar_dados():
     st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
     st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
 
+# --- Funções de Edição e Exclusão ---
+
+def editar_cliente(nome_original, nome_novo, apelido, telefone):
+    """Localiza o cliente pelo nome original, atualiza os dados e salva."""
+    
+    # 1. Encontra o índice
+    idx = st.session_state.clientes[st.session_state.clientes['Nome'] == nome_original].index
+    
+    if idx.empty:
+        st.error(f"Erro: Cliente '{nome_original}' não encontrado.")
+        return
+
+    # 2. Verifica se o novo nome já existe (se for diferente do original)
+    if nome_novo != nome_original and nome_novo in st.session_state.clientes['Nome'].values:
+        st.error(f"Erro: O novo nome '{nome_novo}' já está em uso por outro cliente.")
+        return
+    
+    # 3. Atualiza os dados do cliente
+    st.session_state.clientes.loc[idx, 'Nome'] = nome_novo
+    st.session_state.clientes.loc[idx, 'Apelido/Descrição'] = apelido
+    st.session_state.clientes.loc[idx, 'Telefone'] = telefone
+    
+    # 4. Atualiza os lançamentos (se o nome mudou)
+    if nome_novo != nome_original:
+        st.session_state.lancamentos.loc[st.session_state.lancamentos['Cliente'] == nome_original, 'Cliente'] = nome_novo
+    
+    salvar_dados()
+    st.session_state.editing_client = False
+    st.success(f"Cadastro de '{nome_novo}' atualizado com sucesso!")
+    st.experimental_rerun()
+
+
+def excluir_cliente(nome_cliente):
+    """Exclui o cliente e todas as suas transações, depois salva."""
+    
+    # 1. Exclui o cliente do DataFrame de clientes
+    st.session_state.clientes = st.session_state.clientes[
+        st.session_state.clientes['Nome'] != nome_cliente
+    ].reset_index(drop=True)
+    
+    # 2. Exclui os lançamentos associados
+    st.session_state.lancamentos = st.session_state.lancamentos[
+        st.session_state.lancamentos['Cliente'] != nome_cliente
+    ].reset_index(drop=True)
+    
+    salvar_dados()
+    st.session_state.deleting_client = False
+    st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
+    st.experimental_rerun()
+
+
 # --- Inicializa o Streamlit e carrega os dados ---
 st.set_page_config(layout="wide", page_title="Sistema de Cashback")
 
+# Inicializa o estado de edição/exclusão
 if 'clientes' not in st.session_state:
     carregar_dados()
+if 'editing_client' not in st.session_state:
+    st.session_state.editing_client = False
+if 'deleting_client' not in st.session_state:
+    st.session_state.deleting_client = False
 
-# --- Funções de manipulação de dados ---
 
 def cadastrar_cliente(nome, apelido, telefone):
     """Adiciona um novo cliente ao DataFrame de clientes e salva o CSV."""
@@ -66,7 +121,7 @@ def cadastrar_cliente(nome, apelido, telefone):
     st.session_state.clientes = pd.concat([st.session_state.clientes, novo_cliente], ignore_index=True)
     salvar_dados() 
     st.success(f"Cliente '{nome}' cadastrado com sucesso!")
-    return True
+    st.experimental_rerun() # Recarrega para atualizar listas
 
 def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     """Lança uma venda, atualiza o cashback do cliente e salva o CSV."""
@@ -163,7 +218,7 @@ with tab1:
         st.subheader("Resgate de Cashback")
         
         # Filtra clientes com saldo positivo para resgate
-        clientes_com_cashback = st.session_state.clientes[st.session_state.clientes['Cashback Disponível'] >= 20.00]
+        clientes_com_cashback = st.session_state.clientes[st.session_state.clientes['Cashback Disponível'] >= 20.00].copy()
         clientes_options = [''] + clientes_com_cashback['Nome'].tolist()
         
         with st.form("form_resgate", clear_on_submit=True):
@@ -175,7 +230,6 @@ with tab1:
                 key='nome_cliente_resgate'
             )
             
-            # Inicializa variáveis para evitar erro
             saldo_atual = 0.00
             
             # Campos de entrada
@@ -199,16 +253,17 @@ with tab1:
 
             # Display de informações e avisos (fora do formulário)
             if cliente_resgate != '':
-                saldo_atual = st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_resgate, 'Cashback Disponível'].iloc[0]
-                st.info(f"Saldo Disponível para {cliente_resgate}: R$ {saldo_atual:.2f}")
-                
-                max_resgate_disp = valor_venda_resgate * 0.50
-                st.warning(f"Resgate Máximo Permitido (50% da venda): R$ {max_resgate_disp:.2f}")
+                if cliente_resgate in st.session_state.clientes['Nome'].values:
+                    saldo_atual = st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_resgate, 'Cashback Disponível'].iloc[0]
+                    st.info(f"Saldo Disponível para {cliente_resgate}: R$ {saldo_atual:.2f}")
+                    
+                    max_resgate_disp = valor_venda_resgate * 0.50
+                    st.warning(f"Resgate Máximo Permitido (50% da venda): R$ {max_resgate_disp:.2f}")
+                else:
+                    st.warning("Cliente não encontrado ou saldo insuficiente para resgate.")
             else:
-                # Este aviso não é mais o Missing Submit Button, mas sim um guia para o usuário
                 st.info("Selecione um cliente acima para visualizar o saldo disponível e limites de resgate.")
 
-            # O BOTÃO DE SUBMISSÃO AGORA ESTÁ AQUI, DENTRO DO FORM, MAS FORA DA CONDIÇÃO DE CLIENTE!
             submitted_resgate = st.form_submit_button("Confirmar Resgate")
             
             if submitted_resgate:
@@ -217,18 +272,19 @@ with tab1:
                 elif valor_resgate <= 0:
                     st.error("O valor do resgate deve ser maior que zero.")
                 else:
-                    # Passa o saldo atual como argumento para a função de validação
                     resgatar_cashback(cliente_resgate, valor_resgate, valor_venda_resgate, data_resgate, saldo_atual)
 
 # --------------------------
 # --- ABA 2: Cadastro ---
 # --------------------------
 with tab2:
-    st.header("Cadastro de Clientes")
-    st.markdown("---")
+    st.header("Cadastro de Clientes e Gestão")
     
+    # ------------------
+    # --- NOVO CADASTRO ---
+    # ------------------
+    st.subheader("Novo Cliente")
     with st.form("form_cadastro_cliente", clear_on_submit=True):
-        st.subheader("Novo Cliente")
         nome = st.text_input("Nome da Cliente (Obrigatório):", key='cadastro_nome')
         apelido = st.text_input("Apelido ou Descrição (Opcional):", key='cadastro_apelido')
         telefone = st.text_input("Número de Telefone:", help="Ex: 99999-9999", key='cadastro_telefone')
@@ -242,7 +298,101 @@ with tab2:
                 st.error("O campo 'Nome da Cliente' é obrigatório.")
 
     st.markdown("---")
-    st.subheader("Clientes Cadastrados")
+    
+    # --------------------------------
+    # --- EDIÇÃO E EXCLUSÃO (NOVO) ---
+    # --------------------------------
+    st.subheader("Operações de Edição e Exclusão")
+    
+    clientes_para_operacao = [''] + st.session_state.clientes['Nome'].tolist()
+    
+    # Usa um container para o selectbox e evita que ele desapareça durante a edição
+    with st.container(border=True):
+        cliente_selecionado_operacao = st.selectbox(
+            "Selecione a Cliente para Editar ou Excluir:",
+            options=clientes_para_operacao,
+            index=0,
+            key='cliente_selecionado_operacao',
+            help="Selecione um nome para carregar o formulário de edição/exclusão abaixo."
+        )
+
+    if cliente_selecionado_operacao:
+        cliente_data = st.session_state.clientes[
+            st.session_state.clientes['Nome'] == cliente_selecionado_operacao
+        ].iloc[0]
+        
+        st.markdown("##### Dados do Cliente Selecionado")
+
+        # --- BOTÕES DE AÇÃO ---
+        col_edicao, col_exclusao = st.columns([1, 1])
+        
+        with col_edicao:
+            if st.button("✏️ Editar Cadastro", use_container_width=True, key='btn_editar'):
+                st.session_state.editing_client = cliente_selecionado_operacao
+                st.session_state.deleting_client = False # Cancela qualquer exclusão pendente
+                st.experimental_rerun()
+        
+        with col_exclusao:
+            if st.button("🗑️ Excluir Cliente", use_container_width=True, key='btn_excluir', type='primary'):
+                st.session_state.deleting_client = cliente_selecionado_operacao
+                st.session_state.editing_client = False # Cancela qualquer edição pendente
+                st.experimental_rerun()
+        
+        st.markdown("---")
+        
+        # ------------------
+        # --- MODO DE EDIÇÃO ---
+        # ------------------
+        if st.session_state.editing_client == cliente_selecionado_operacao:
+            st.subheader(f"Editando: {cliente_selecionado_operacao}")
+            
+            with st.form("form_edicao_cliente", clear_on_submit=False):
+                # Campos de Edição
+                novo_nome = st.text_input("Nome (Chave de Identificação):", 
+                                          value=cliente_data['Nome'], 
+                                          key='edicao_nome')
+                
+                novo_apelido = st.text_input("Apelido ou Descrição:", 
+                                             value=cliente_data['Apelido/Descrição'], 
+                                             key='edicao_apelido')
+                
+                novo_telefone = st.text_input("Número de Telefone:", 
+                                              value=cliente_data['Telefone'], 
+                                              key='edicao_telefone')
+                
+                # Exibe o Cashback Disponível (NÃO EDITÁVEL)
+                st.info(f"Cashback Disponível: R$ {cliente_data['Cashback Disponível']:.2f} (Não editável)")
+
+                # Botões de Concluir/Cancelar
+                col_concluir, col_cancelar = st.columns(2)
+                with col_concluir:
+                    if st.form_submit_button("✅ Concluir Edição", use_container_width=True, type="secondary"):
+                        editar_cliente(cliente_selecionado_operacao, novo_nome.strip(), novo_apelido.strip(), novo_telefone.strip())
+                
+                with col_cancelar:
+                    # Botão de Cancelar (usa st.button porque é fora do form_submit_button)
+                    if st.button("❌ Cancelar Edição", use_container_width=True, type='primary'):
+                        st.session_state.editing_client = False
+                        st.experimental_rerun()
+        
+        # ------------------
+        # --- MODO DE EXCLUSÃO ---
+        # ------------------
+        elif st.session_state.deleting_client == cliente_selecionado_operacao:
+            st.error(f"ATENÇÃO: Você está prestes a excluir **{cliente_selecionado_operacao}**.")
+            st.warning("Esta ação é irreversível e removerá todos os lançamentos de venda/resgate associados a esta cliente.")
+            
+            col_confirma, col_cancela_del = st.columns(2)
+            with col_confirma:
+                if st.button(f"🔴 Tenho Certeza! Excluir {cliente_selecionado_operacao}", use_container_width=True, key='confirmar_exclusao', type='primary'):
+                    excluir_cliente(cliente_selecionado_operacao)
+            with col_cancela_del:
+                if st.button("↩️ Cancelar Exclusão", use_container_width=True, key='cancelar_exclusao'):
+                    st.session_state.deleting_client = False
+                    st.experimental_rerun()
+        
+    st.markdown("---")
+    st.subheader("Clientes Cadastrados (Visualização)")
     st.dataframe(st.session_state.clientes, hide_index=True, use_container_width=True)
 
 
