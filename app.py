@@ -72,7 +72,7 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
     salvar_dados()
     st.session_state.editing_client = False
     st.success(f"Cadastro de '{nome_novo}' atualizado com sucesso!")
-    st.rerun() # CORRIGIDO: Usando st.rerun()
+    st.rerun() 
 
 
 def excluir_cliente(nome_cliente):
@@ -91,7 +91,7 @@ def excluir_cliente(nome_cliente):
     salvar_dados()
     st.session_state.deleting_client = False
     st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
-    st.rerun() # CORRIGIDO: Usando st.rerun()
+    st.rerun()
 
 
 # --- Inicializa o Streamlit e carrega os dados ---
@@ -121,7 +121,7 @@ def cadastrar_cliente(nome, apelido, telefone):
     st.session_state.clientes = pd.concat([st.session_state.clientes, novo_cliente], ignore_index=True)
     salvar_dados() 
     st.success(f"Cliente '{nome}' cadastrado com sucesso!")
-    st.rerun() # CORRIGIDO: Usando st.rerun()
+    st.rerun()
 
 def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     """Lança uma venda, atualiza o cashback do cliente e salva o CSV."""
@@ -330,13 +330,13 @@ with tab2:
             if st.button("✏️ Editar Cadastro", use_container_width=True, key='btn_editar'):
                 st.session_state.editing_client = cliente_selecionado_operacao
                 st.session_state.deleting_client = False # Cancela qualquer exclusão pendente
-                st.rerun() # CORRIGIDO: Usando st.rerun()
+                st.rerun() 
         
         with col_exclusao:
             if st.button("🗑️ Excluir Cliente", use_container_width=True, key='btn_excluir', type='primary'):
                 st.session_state.deleting_client = cliente_selecionado_operacao
                 st.session_state.editing_client = False # Cancela qualquer edição pendente
-                st.rerun() # CORRIGIDO: Usando st.rerun()
+                st.rerun() 
         
         st.markdown("---")
         
@@ -346,6 +346,7 @@ with tab2:
         if st.session_state.editing_client == cliente_selecionado_operacao:
             st.subheader(f"Editando: {cliente_selecionado_operacao}")
             
+            # O formulário agora só contém os campos de input e o botão de CONCLUIR EDIÇÃO.
             with st.form("form_edicao_cliente", clear_on_submit=False):
                 # Campos de Edição
                 novo_nome = st.text_input("Nome (Chave de Identificação):", 
@@ -363,17 +364,23 @@ with tab2:
                 # Exibe o Cashback Disponível (NÃO EDITÁVEL)
                 st.info(f"Cashback Disponível: R$ {cliente_data['Cashback Disponível']:.2f} (Não editável)")
 
-                # Botões de Concluir/Cancelar
-                col_concluir, col_cancelar = st.columns(2)
-                with col_concluir:
-                    if st.form_submit_button("✅ Concluir Edição", use_container_width=True, type="secondary"):
-                        editar_cliente(cliente_selecionado_operacao, novo_nome.strip(), novo_apelido.strip(), novo_telefone.strip())
-                
-                with col_cancelar:
-                    # Botão de Cancelar (usa st.button porque é fora do form_submit_button)
-                    if st.button("❌ Cancelar Edição", use_container_width=True, type='primary'):
-                        st.session_state.editing_client = False
-                        st.rerun() # CORRIGIDO: Usando st.rerun()
+                # Botão de Concluir (DENTRO DO FORM)
+                submitted_edicao = st.form_submit_button("✅ Concluir Edição", use_container_width=True, type="secondary")
+            
+            # --- LÓGICA DE SUBMISSÃO (APÓS O FORM) ---
+            if submitted_edicao:
+                # Os valores são acessados pelas chaves da sessão (keys do form)
+                editar_cliente(cliente_selecionado_operacao, st.session_state.edicao_nome.strip(), st.session_state.edicao_apelido.strip(), st.session_state.edicao_telefone.strip())
+            
+            # --- BOTÃO DE CANCELAR (FORA DO FORM PARA EVITAR O ERRO) ---
+            # Usamos colunas para alinhamento horizontal após o formulário.
+            col_concluir_placeholder, col_cancelar = st.columns(2)
+            
+            with col_cancelar:
+                # O st.button precisa estar fora do st.form
+                if st.button("❌ Cancelar Edição", use_container_width=True, type='primary', key='cancelar_edicao_btn_final'):
+                    st.session_state.editing_client = False
+                    st.rerun()
         
         # ------------------
         # --- MODO DE EXCLUSÃO ---
@@ -389,7 +396,7 @@ with tab2:
             with col_cancela_del:
                 if st.button("↩️ Cancelar Exclusão", use_container_width=True, key='cancelar_exclusao'):
                     st.session_state.deleting_client = False
-                    st.rerun() # CORRIGIDO: Usando st.rerun()
+                    st.rerun() 
         
     st.markdown("---")
     st.subheader("Clientes Cadastrados (Visualização)")
