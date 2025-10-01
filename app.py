@@ -2,46 +2,93 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import os
+import io # Necessário para ler/escrever o CSV via conexão do GitHub
 
-# --- Nomes dos arquivos CSV ---
+# --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03
 
-# --- Configuração Inicial e Funções de Carregamento/Salvamento (Local CSV) ---
+# Determina o modo de persistência (GitHub se o token estiver em secrets)
+# O Streamlit Community Cloud exige o uso de st.secrets para acessar o token.
+GITHUB_CONFIG = st.secrets.get("github")
+PERSISTENCE_MODE = "GITHUB" if GITHUB_CONFIG and GITHUB_CONFIG.get("token") else "LOCAL"
 
+# --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
+
+def carregar_dados_github(file_path, df_columns):
+    """Carrega dados usando a conexão GitHub Storage."""
+    try:
+        conn = st.connection("github", type="experimental_github_storage")
+        file_content = conn.read(file_path)
+        df = pd.read_csv(io.StringIO(file_content))
+        return df
+    except Exception as e:
+        # Se o arquivo não for encontrado ou estiver vazio/malformado
+        st.warning(f"Não foi possível carregar '{file_path}' do GitHub. Usando DataFrame vazio/inicial. (Detalhe: {e})")
+        return pd.DataFrame(columns=df_columns)
+
+def salvar_dados_github(file_path, df):
+    """Salva dados usando a conexão GitHub Storage (fazendo um commit)."""
+    try:
+        conn = st.connection("github", type="experimental_github_storage")
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        conn.write(
+            file_path=file_path,
+            data=csv_buffer.getvalue(),
+            commit_message=f"AUTOSAVE CASHBACK: Atualizando {file_path}",
+            branch=GITHUB_CONFIG.get("branch", "main")
+        )
+        return True
+    except Exception as e:
+        st.error(f"ERRO CRÍTICO: Não foi possível salvar '{file_path}' no GitHub. Verifique as permissões do token. Detalhes: {e}")
+        return False
+        
 def carregar_dados():
-    """Tenta carregar os DataFrames a partir dos CSVs. Se não existirem, cria DataFrames vazios."""
+    """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    # Carregar Clientes
-    if os.path.exists(CLIENTES_CSV):
-        try:
-            st.session_state.clientes = pd.read_csv(CLIENTES_CSV)
-        except pd.errors.EmptyDataError:
-            st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
-    else:
-        st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
+    if PERSISTENCE_MODE == "GITHUB":
+        # Carrega Clientes do GitHub
+        st.session_state.clientes = carregar_dados_github(
+            CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível']
+        )
+        
+        # Carrega Lançamentos do GitHub
+        st.session_state.lancamentos = carregar_dados_github(
+            LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
+        )
+        
+    else: # Modo LOCAL (para desenvolvimento sem secrets)
+        if os.path.exists(CLIENTES_CSV):
+            try: st.session_state.clientes = pd.read_csv(CLIENTES_CSV)
+            except pd.errors.EmptyDataError: st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
+        else: st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
 
-    # Adiciona um cliente de exemplo se estiver vazio
+        if os.path.exists(LANÇAMENTOS_CSV):
+            try: st.session_state.lancamentos = pd.read_csv(LANÇAMENTOS_CSV)
+            except pd.errors.EmptyDataError: st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
+        else: st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
+
+
+    # Inicialização Pós-Carga: Adiciona cliente exemplo se vazio e garante tipos
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        salvar_dados() 
-            
-    # Carregar Lançamentos
-    if os.path.exists(LANÇAMENTOS_CSV):
-        try:
-            st.session_state.lancamentos = pd.read_csv(LANÇAMENTOS_CSV)
-            # Garante que a coluna 'Data' seja do tipo date
-            st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data']).dt.date
-        except pd.errors.EmptyDataError:
-            st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
-    else:
-        st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
+        salvar_dados() # Salva o cliente de exemplo inicial
+
+    if not st.session_state.lancamentos.empty:
+        st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data']).dt.date
+    
 
 def salvar_dados():
-    """Salva os DataFrames de volta nos arquivos CSV."""
-    st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
-    st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
+    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
+    if PERSISTENCE_MODE == "GITHUB":
+        salvar_dados_github(CLIENTES_CSV, st.session_state.clientes)
+        salvar_dados_github(LANÇAMENTOS_CSV, st.session_state.lancamentos)
+    else: # Modo LOCAL
+        st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
+        st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
+
 
 # --- Funções de Edição e Exclusão ---
 
@@ -97,7 +144,12 @@ def excluir_cliente(nome_cliente):
 # --- Inicializa o Streamlit e carrega os dados ---
 st.set_page_config(layout="wide", page_title="Sistema de Cashback")
 
-# Inicializa o estado de edição/exclusão
+# Verifica e informa o modo de persistência
+if PERSISTENCE_MODE == "GITHUB":
+    st.sidebar.success("💾 Persistência: GitHub Storage Ativa (Salvamento automático no repositório)")
+else:
+    st.sidebar.warning("⚠️ Persistência: Modo Local. Alterações não serão salvas após o reinício do app.")
+
 if 'clientes' not in st.session_state:
     carregar_dados()
 if 'editing_client' not in st.session_state:
