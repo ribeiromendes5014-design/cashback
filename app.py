@@ -24,8 +24,8 @@ except ImportError:
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 PRODUTOS_TURBO_CSV = 'produtos_turbo.csv'
-BONUS_INDICACAO_PERCENTUAL = 0.03 # 3% para o indicador
-CASHBACK_INDICADO_PRIMEIRA_COMPRA = 0.05 # 5% para o indicado
+BONUS_INDICACAO_PERCENTUAL = 0.05 # 5% para o indicador
+CASHBACK_INDICADO_PRIMEIRA_COMPRA = 0.08 # 8% para o indicado
 
 # Configuração do logo para o novo layout
 LOGO_DOCEBELLA_URL = "https://i.ibb.co/fYCWBKTm/Logo-Doce-Bella-Cosm-tico.png" # Link do logo
@@ -264,6 +264,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
     st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = True
 
+    # SE FOR A PRIMEIRA COMPRA DE CLIENTE INDICADO, PROCESSA O BÔNUS
     if not cliente_data['Primeira Compra Feita'] and cliente_data['Indicado Por']:
         indicador_nome = cliente_data['Indicado Por']
         idx_indicador = st.session_state.clientes[st.session_state.clientes['Nome'] == indicador_nome].index
@@ -274,9 +275,27 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, bonus_lanc], ignore_index=True)
             st.success(f"🎁 Bônus de R$ {bonus:.2f} creditado para {indicador_nome}!")
 
+            # LÓGICA DE MENSAGEM PARA O INDICADOR
+            if TELEGRAM_ENABLED:
+                nivel_indicador = st.session_state.clientes.loc[idx_indicador, 'Nivel Atual'].iloc[0]
+                bonus_str = f"R$ {bonus:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                
+                mensagem_indicador = (
+                    f"Oi, {indicador_nome}! Tudo bem?\n\n"
+                    f"Agradecemos demais a sua indicação da {cliente_nome}! Ter você como nossa cliente e parceira nos enche de orgulho. ✨\n\n"
+                    f"Graças à sua indicação, você acaba de ganhar *{bonus_str}* extras em seu Programa de Fidelidade Doce&Bella! Isso te ajuda a chegar ainda mais rápido ao próximo nível. 🚀\n\n"
+                    f"Seu nível atual é: *{nivel_indicador}*.\n\n"
+                    "Resgate seus créditos na próxima compra e continue aproveitando as vantagens!\n\n"
+                    "Até a próxima, com carinho,\n"
+                    "Doce&Bella"
+                )
+                enviar_mensagem_telegram(mensagem_indicador)
+
+
     novo_lancamento = pd.DataFrame([{'Data': data_venda, 'Cliente': cliente_nome, 'Tipo': 'Venda', 'Valor Venda/Resgate': valor_venda, 'Valor Cashback': valor_cashback, 'Venda Turbo': 'Sim' if venda_turbo_selecionada else 'Não'}])
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
 
+    # LÓGICA DE MENSAGEM PARA O CLIENTE QUE COMPROU
     if TELEGRAM_ENABLED:
         fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
         agora_brasil = datetime.now(fuso_horario_brasil)
@@ -344,12 +363,10 @@ def excluir_lancamento_venda(lancamento_index: int):
 
     cliente_nome = lancamento['Cliente']
     
-    # --- CORREÇÃO APLICADA AQUI ---
     temp_venda = pd.to_numeric(lancamento['Valor Venda/Resgate'], errors='coerce')
     temp_cashback = pd.to_numeric(lancamento['Valor Cashback'], errors='coerce')
     valor_venda = temp_venda if pd.notna(temp_venda) else 0
     valor_cashback = temp_cashback if pd.notna(temp_cashback) else 0
-    # --- FIM DA CORREÇÃO ---
 
     # Reverter dados do cliente
     idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
@@ -662,4 +679,3 @@ st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 st.info(f"Modo de Persistência: {PERSISTENCE_MODE}")
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
