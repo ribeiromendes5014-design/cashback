@@ -316,7 +316,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
             f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n"
             f"Total de compras realizadas: *{numero_total_vendas}*\n\n" # <--- LINHA AJUSTADA
             f"=================================\n\n"
-            f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS NO DELIVERY*\n"
+            f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS Na loja*\n"
             f"- Máximo de resgate Cashback: *50.00% sobre o valor do pedido.*\n"
             f"- Ter no mínimo *R$ 20,00* de saldo em conta. \n" 
             f" \n"
@@ -887,6 +887,7 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
