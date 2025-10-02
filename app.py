@@ -218,7 +218,7 @@ def carregar_dados_do_csv(file_path, df_columns):
             pass
             
     # Garante que todas as colunas existem e inicializa valores padrão
-    for col in df_columns:
+    for col in colunas_esperadas: # Usa a lista de colunas externas
         if col not in df.columns: 
             df[col] = "" # Inicia como string vazia
         
@@ -240,20 +240,23 @@ def carregar_dados_do_csv(file_path, df_columns):
 def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    # CLIENTES: Colunas adicionadas para o sistema de níveis e indicação
+    # 1. CLIENTES: Colunas
     CLIENTES_COLS = [
         'Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível',
         'Gasto Acumulado', 'Nivel Atual', 'Indicado Por', 'Primeira Compra Feita'
     ]
-    
+    global colunas_esperadas # Define a variável global para uso em carregar_dados_do_csv
+    colunas_esperadas = CLIENTES_COLS
     st.session_state.clientes = carregar_dados_do_csv(CLIENTES_CSV, CLIENTES_COLS)
     
-    # LANÇAMENTOS: Adicionado 'Venda Turbo'
+    # 2. LANÇAMENTOS: Colunas
     LANÇAMENTOS_COLS = ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback', 'Venda Turbo']
+    colunas_esperadas = LANÇAMENTOS_COLS
     st.session_state.lancamentos = carregar_dados_do_csv(LANÇAMENTOS_CSV, LANÇAMENTOS_COLS)
     
-    # PRODUTOS TURBO: Novo DataFrame
+    # 3. PRODUTOS TURBO: Colunas
     PRODUTOS_TURBO_COLS = ['Nome Produto', 'Data Início', 'Data Fim', 'Ativo']
+    colunas_esperadas = PRODUTOS_TURBO_COLS
     st.session_state.produtos_turbo = carregar_dados_do_csv(PRODUTOS_TURBO_CSV, PRODUTOS_TURBO_COLS)
 
     
@@ -557,10 +560,6 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             "✨ Novidade imperdível na Doce&Bella! ✨\n\n"
             "Agora você pode aproveitar ainda mais as suas compras favoritas com o nosso Programa de Fidelidade 🛍💖\n\n"
             f"Você está no **NÍVEL {novo_nivel.upper()}**!\n\n"
-            
-            # --- PARTE 2: Mensagem de Cashback e Saldo ---
-            f"🎉 *PARABÉNS, {cliente_nome.upper()}! VOCÊ GANHOU CASHBACK!* 🎉\n\n"
-            f"A loja **Doce&Bella** te presenteia com *{cashback_ganho_str}* em novos créditos!\n\n"
             
             f"--- *Seu Saldo Atualizado* ---\n"
             f"🗓️ **Data/Hora:** *{data_hora_lancamento}*\n"
