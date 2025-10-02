@@ -350,7 +350,8 @@ st.markdown("""
     /* Ajuste para centralizar o logo */
     .logo-container {
         padding: 10px 20px;
-        background-color: white; /* Fundo branco para o logo */
+        /* CORREÇÃO: Removendo o fundo branco para que o PNG transparente combine com o fundo da página */
+        background-color: transparent; 
     }
 
     </style>
@@ -703,7 +704,7 @@ def render_header():
     with col_logo:
         st.markdown(f'''
             <div class="logo-container">
-                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 150px;"> 
+                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 80px;"> 
             </div>
         ''', unsafe_allow_html=True)
         
@@ -773,5 +774,3 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
-
