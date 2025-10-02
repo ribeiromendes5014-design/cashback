@@ -283,7 +283,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     salvar_dados()  
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome}. Cashback de R$ {valor_cashback:.2f} adicionado.")
 
-    # 2. Lógica de Envio para o Telegram (AJUSTADO PARA FUSO HORÁRIO BRASIL)
+    # 2. Lógica de Envio para o Telegram
     if TELEGRAM_ENABLED:
         
         # Filtra SÓ as vendas (incluindo a atual)
@@ -292,18 +292,15 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
             (st.session_state.lancamentos['Tipo'] == 'Venda')
         ].copy()
         
-        # Converte para numérico (necessário se o CSV salvar como string)
-        vendas_do_cliente['Valor Venda/Resgate'] = pd.to_numeric(vendas_do_cliente['Valor Venda/Resgate'], errors='coerce').fillna(0)
-        
-        # Calcula o total de compras do cliente
-        total_compras = vendas_do_cliente['Valor Venda/Resgate'].sum()
+        # 🟢 CORREÇÃO: Pega o NÚMERO TOTAL DE VENDAS
+        numero_total_vendas = len(vendas_do_cliente)
         
         # Obtém o saldo atualizado
         saldo_atualizado = st.session_state.clientes.loc[
             st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'
         ].iloc[0]
         
-        # 🟢 CORREÇÃO DO FUSO HORÁRIO BRASIL (São Paulo)
+        # --- Fuso Horário Brasil ---
         fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
         agora_brasil = datetime.now(fuso_horario_brasil)
         data_hora_lancamento = agora_brasil.strftime('%d/%m/%Y às %H:%M')
@@ -311,14 +308,13 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         # Formatação de valores (R$ 1.000,00)
         cashback_ganho_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        total_compras_str = f"R$ {total_compras:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
-        # Monta a mensagem final exatamente no formato solicitado, usando Markdown para negrito
+        # Monta a mensagem final no formato solicitado
         mensagem_telegram = (
             f"Olá *{cliente_nome}*, aqui é o programa de fidelidade da loja Doce&Bella\n\n"
             f"Você ganhou *{cashback_ganho_str}* em créditos CASHBACK.\n\n"
             f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n"
-            f"Total acumulado em compras: *{total_compras_str}*\n\n"
+            f"Total de compras realizadas: *{numero_total_vendas}*\n\n" # <--- LINHA AJUSTADA
             f"=================================\n\n"
             f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS NO DELIVERY*\n"
             f"- Máximo de resgate Cashback: *50.00% sobre o valor do pedido.*\n"
@@ -891,6 +887,7 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
