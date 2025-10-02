@@ -101,10 +101,16 @@ def enviar_mensagem_telegram(mensagem: str):
 
 # --- Funções de Persistência via GitHub API (PyGithub) ---
 
-def load_csv_github(url: str) -> pd.DataFrame | None:
-    """Carrega um CSV do GitHub usando a URL raw."""
+# CORREÇÃO: Função agora recebe a chave de versão para ser usada como cachebuster
+def load_csv_github(url: str, version_key: int) -> pd.DataFrame | None:
+    """Carrega um CSV do GitHub usando a URL raw, forçando o cachebuster."""
+    
+    # Adiciona o cachebuster à URL para garantir que o requests faça uma nova requisição
+    url_with_cachebuster = f"{url}?v={version_key}"
+    
     try:
-        response = requests.get(url, timeout=10)
+        # A nova URL força o requests a ignorar seu cache interno
+        response = requests.get(url_with_cachebuster, timeout=10)
         response.raise_for_status()
         df = pd.read_csv(StringIO(response.text), dtype=str)
         if df.empty or len(df.columns) < 2:
@@ -163,13 +169,15 @@ def salvar_dados():
         st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
         
-def carregar_dados_do_csv(file_path, df_columns):
+# CORREÇÃO: Função agora recebe a chave de versão para passar adiante
+def carregar_dados_do_csv(file_path, df_columns, version_key):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
     df = pd.DataFrame(columns=df_columns)  
     
     if PERSISTENCE_MODE == "GITHUB":
         url_raw = f"{URL_BASE_REPOS}{file_path}"
-        df_carregado = load_csv_github(url_raw)
+        # CORREÇÃO: Passa a chave de versão para load_csv_github
+        df_carregado = load_csv_github(url_raw, version_key) 
         if df_carregado is not None:
             df = df_carregado
         
@@ -188,15 +196,12 @@ def carregar_dados_do_csv(file_path, df_columns):
 def carregar_dados(data_version_key): # <-- ESTE ARGUMENTO É A CHAVE DE INVALIDAÇÃO
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    # st.session_state não deve ser usada aqui se o objetivo é retornar o DF
-    # no entanto, como o seu código armazena os DFs diretamente no state, mantemos a estrutura
-    
     st.session_state.clientes = carregar_dados_do_csv(
-        CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível']
+        CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'], data_version_key # CHAVE PASSADA
     )
     
     st.session_state.lancamentos = carregar_dados_do_csv(
-        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
+        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'], data_version_key # CHAVE PASSADA
     )
     
     # ... o resto da inicialização continua aqui ...
@@ -627,8 +632,7 @@ def render_lancamento():
                     else:
                         st.error("Erro ao calcular saldo. Cliente não encontrado.")
 
-    # --- NOVO BLOCO: Exibe Histórico do Cliente Selecionado (em Venda ou Resgate) ---
-    # Nota: Usamos 'nome_cliente_venda' e 'nome_cliente_resgate' para definir quem está sendo manipulado
+    # --- BLOCO: Exibe Histórico do Cliente Selecionado (em Venda ou Resgate) ---
     
     # Decide qual nome de cliente usar para a consulta de histórico
     cliente_para_historico = ''
