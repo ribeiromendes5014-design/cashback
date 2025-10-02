@@ -179,6 +179,33 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
         return False
 
+
+# --- Funções de Carregamento/Salvamento ---
+
+def salvar_dados():
+    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache e recarrega os dados."""
+    
+    # Limpa o cache para forçar a releitura dos CSVs.
+    st.cache_data.clear() 
+
+    # Incrementa a chave de estado para invalidar o cache pela assinatura da função.
+    if 'data_version' not in st.session_state:
+        st.session_state.data_version = 0
+    st.session_state.data_version += 1
+
+    if PERSISTENCE_MODE == "GITHUB":
+        salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
+        salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
+        salvar_dados_no_github(st.session_state.produtos_turbo, PRODUTOS_TURBO_CSV, "AUTOSAVE: Atualizando produtos turbo.")
+    else: # Modo LOCAL
+        st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
+        st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
+        st.session_state.produtos_turbo.to_csv(PRODUTOS_TURBO_CSV, index=False)
+
+    # ✅ Recarrega os DataFrames atualizados no session_state
+    carregar_dados(st.session_state.data_version)
+
+
 # --- Funções de Carregamento/Salvamento ---
 
 def salvar_dados():
@@ -1439,3 +1466,4 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
