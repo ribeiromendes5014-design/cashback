@@ -25,7 +25,7 @@ LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
 # Configuração do logo para o novo layout
-LOGO_DOCEBELLA_URL = "https://i.ibb.co/cdqJ92W/Logo-Doce-Bella-Cosm-tico.png" # Novo link para o logo
+LOGO_DOCEBELLA_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" # Novo link para o logo
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -628,16 +628,22 @@ def render_home():
     vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda']
     
     total_vendas_mes = 0.0
-    # CORREÇÃO: Verifica se o DataFrame de vendas está vazio antes de tentar filtrar por data e calcular a soma.
+    # CORREÇÃO: Tratamento de KeyError e Data
     if not vendas_df.empty:
-        vendas_mes = vendas_df[
-            vendas_df['Data'].apply(
-                # Garante que x seja pd.NaT (not a time) ou date object.
+        # Garante que a coluna 'Data' seja tratada corretamente
+        vendas_df_copy = vendas_df.copy()
+        vendas_df_copy['Data'] = pd.to_datetime(vendas_df_copy['Data'], errors='coerce')
+        
+        vendas_mes = vendas_df_copy[
+            vendas_df_copy['Data'].apply(
+                # Filtra pelo mês atual
                 lambda x: x.month == date.today().month if pd.notna(x) else False
             )
         ]
-        # Soma apenas se o DataFrame do mês não estiver vazio
+        
         if not vendas_mes.empty:
+            # Garante que a coluna de valor é numérica antes de somar
+            vendas_mes['Valor Venda/Resgate'] = pd.to_numeric(vendas_mes['Valor Venda/Resgate'], errors='coerce').fillna(0)
             total_vendas_mes = vendas_mes['Valor Venda/Resgate'].sum()
 
 
@@ -682,12 +688,13 @@ if "pagina_atual" not in st.session_state:
 def render_header():
     """Renderiza o header customizado com a navegação em botões."""
     
-    col_logo, col_nav = st.columns([1, 4])
+    # Colunas para o Logo e a Navegação (Aumentamos a coluna do logo)
+    col_logo, col_nav = st.columns([1.5, 4])
     
     with col_logo:
         st.markdown(f'''
             <div class="logo-container">
-                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 50px;">
+                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 80px;"> 
             </div>
         ''', unsafe_allow_html=True)
         
@@ -748,4 +755,3 @@ if 'editing_client' not in st.session_state:
     st.session_state.editing_client = False
 if 'deleting_client' not in st.session_state:
     st.session_state.deleting_client = False
-
