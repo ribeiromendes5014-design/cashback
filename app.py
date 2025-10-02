@@ -971,7 +971,61 @@ def render_cadastro():
     # --- NOVO CADASTRO ---
     # ------------------
     st.subheader("Novo Cliente")
+    
+    # ----------------------------------------------
+    # 🟢 PROGRAMA INDIQUE E GANHE (FORA DO FORM PARA REATIVIDADE)
+    # ----------------------------------------------
+    
+    # Inicializa o estado do checkbox se ainda não existir
+    if 'is_indicado_check' not in st.session_state:
+         st.session_state.is_indicado_check = False
+         
+    # Checkbox para indicar se houve indicação (FORÇA RERUN IMEDIATA)
+    # Usamos o value para garantir que ele mantenha o estado visual após recarregar.
+    st.session_state.is_indicado_check = st.checkbox(
+        "Esta cliente foi indicada por outra?", 
+        value=st.session_state.get('is_indicado_check', False), 
+        key='is_indicado_check'
+    )
+    
+    indicado_por = ''
+    
+    if st.session_state.is_indicado_check:
+        st.markdown("---")
+        st.markdown("##### 🎁 Programa Indique e Ganhe")
+        
+        clientes_indicadores = [''] + st.session_state.clientes['Nome'].tolist()
+        
+        # Selectbox para o indicador (IMEDIATA APARIÇÃO)
+        indicado_por = st.selectbox(
+            "Nome da Cliente Indicadora:", 
+            options=clientes_indicadores, 
+            key='indicador_nome_select', # Salva o nome do indicador no session state
+            index=0
+        )
+        
+        # Mensagem de benefício
+        bonus_pct = int(BONUS_INDICACAO_PERCENTUAL * 100)
+        cashback_indicado_pct = int(CASHBACK_INDICADO_PRIMEIRA_COMPRA * 100)
+        
+        if indicado_por:
+            st.success(
+                f"**Bônus Indicação:** A cliente **{indicado_por}** receberá **{bonus_pct}%** do valor da primeira compra, creditado após o lançamento da venda desta nova cliente. "
+                f"A nova cliente receberá **{cashback_indicado_pct}%** de cashback na primeira compra!"
+            )
+        else:
+             st.info(
+                f"A nova cliente receberá **{cashback_indicado_pct}%** de cashback na primeira compra! "
+                f"Selecione a cliente indicadora acima para que ela receba o bônus de **{bonus_pct}%**."
+            )
+    
+    # ----------------------------------------------
+    # --- INPUTS DE DADOS PESSOAIS DENTRO DO FORM ---
+    # ----------------------------------------------
     with st.form("form_cadastro_cliente", clear_on_submit=True):
+        st.markdown("---")
+        st.markdown("##### Dados Pessoais") # Nova sub-seção para organizar
+        
         col_nome, col_tel = st.columns(2)
         with col_nome:
             nome = st.text_input("Nome da Cliente (Obrigatório):", key='cadastro_nome')
@@ -980,42 +1034,22 @@ def render_cadastro():
             
         apelido = st.text_input("Apelido ou Descrição (Opcional):", key='cadastro_apelido')
         
-        st.markdown("---")
-        st.markdown("##### 🎁 Programa Indique e Ganhe")
         
-        # Campo de Indicação
-        is_indicado = st.checkbox("Esta cliente foi indicada por outra?", key='is_indicado')
-        indicado_por = ''
-        if is_indicado:
-            clientes_indicadores = [''] + st.session_state.clientes['Nome'].tolist()
-            indicado_por = st.selectbox(
-                "Nome da Cliente Indicadora:", 
-                options=clientes_indicadores, 
-                key='indicado_por',
-                index=0
-            )
-            
-            # 🟢 MENSAGEM DE BENEFÍCIO DO INDICADOR (MELHORIA SOLICITADA)
-            bonus_pct = int(BONUS_INDICACAO_PERCENTUAL * 100)
-            cashback_indicado_pct = int(CASHBACK_INDICADO_PRIMEIRA_COMPRA * 100)
-            
-            if indicado_por:
-                st.success(
-                    f"**Bônus Indicação:** A cliente **{indicado_por}** receberá **{bonus_pct}%** do valor da primeira compra, creditado após o lançamento da venda desta nova cliente. "
-                    f"A nova cliente receberá **{cashback_indicado_pct}%** de cashback na primeira compra!"
-                )
-            else:
-                 st.info(
-                    f"A nova cliente receberá **{cashback_indicado_pct}%** de cashback na primeira compra! "
-                    f"Selecione a cliente indicadora acima para que ela receba o bônus de **{bonus_pct}%**."
-                )
-
-
         submitted_cadastro = st.form_submit_button("Cadastrar Cliente")
         
+        
         if submitted_cadastro:
-            if nome:
-                cadastrar_cliente(nome.strip(), apelido.strip(), telefone.strip(), indicado_por.strip())
+            # Captura o valor final do indicador do session state, que foi atualizado fora do form.
+            indicado_por_final = st.session_state.get('indicador_nome_select', '') if st.session_state.get('is_indicado_check', False) else ''
+            
+            # Use as keys do session state para pegar os dados do form
+            if st.session_state.cadastro_nome:
+                cadastrar_cliente(
+                    st.session_state.cadastro_nome.strip(), 
+                    st.session_state.cadastro_apelido.strip(), 
+                    st.session_state.cadastro_telefone.strip(), 
+                    indicado_por_final.strip()
+                )
             else:
                 st.error("O campo 'Nome da Cliente' é obrigatório.")
 
