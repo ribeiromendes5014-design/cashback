@@ -28,7 +28,7 @@ CASHBACK_PERCENTUAL = 0.03
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
-    # O código agora espera estas variáveis no seu .streamlit/secrets.toml
+    # CORREÇÃO: Acessa os segredos assumindo que estão na raiz do secrets.toml (formato mais comum)
     TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_OWNER = st.secrets["REPO_OWNER"]
     REPO_NAME = st.secrets["REPO_NAME"]
@@ -98,6 +98,16 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         return False
 
 # --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
+
+# Função salva-dados movida para cima para ser acessível na carregar_dados
+def salvar_dados():
+    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
+    if PERSISTENCE_MODE == "GITHUB":
+        salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
+        salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
+    else: # Modo LOCAL
+        st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
+        st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
         
 def carregar_dados_do_csv(file_path, df_columns):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
@@ -138,6 +148,7 @@ def carregar_dados():
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
         # Salva o cliente de exemplo (necessário para inicializar o CSV no GitHub)
+        # ESTE PONTO AGORA CHAMA salvar_dados, que está definido acima
         salvar_dados() 
         
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
@@ -146,16 +157,6 @@ def carregar_dados():
         # Garante que a coluna 'Data' seja do tipo date para os filtros
         st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
     
-
-def salvar_dados():
-    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
-    if PERSISTENCE_MODE == "GITHUB":
-        salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
-        salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
-    else: # Modo LOCAL
-        st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
-        st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
-
 
 # --- Funções de Edição e Exclusão (Chamam salvar_dados()) ---
 
