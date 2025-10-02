@@ -63,6 +63,38 @@ if PERSISTENCE_MODE == "GITHUB":
     URL_BASE_REPOS = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/"
 
 
+# --- Configuração e Função do Telegram (AJUSTADO) ---
+try:
+    TELEGRAM_BOT_ID = st.secrets["telegram"]["BOT_ID"]
+    TELEGRAM_CHAT_ID = st.secrets["telegram"]["CHAT_ID"]
+    TELEGRAM_ENABLED = True
+except KeyError:
+    TELEGRAM_ENABLED = False
+    
+def enviar_mensagem_telegram(mensagem: str):
+    """Envia uma mensagem para o Telegram usando a API do bot."""
+    if not TELEGRAM_ENABLED:
+        return
+
+    # Utiliza as variáveis carregadas do st.secrets
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_ID}/sendMessage"
+    
+    # Usando 'Markdown' para formatação (negrito, itálico)
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': mensagem,
+        'parse_mode': 'Markdown' 
+    }
+
+    try:
+        # Não precisa do 'st.toast' aqui; o sucesso da venda já foi avisado.
+        requests.post(url, data=payload, timeout=5)
+    except requests.exceptions.RequestException as e:
+        # Se a notificação falhar, apenas registra o erro e continua a aplicação.
+        print(f"Erro ao enviar para o Telegram: {e}") 
+        pass 
+
+
 # --- Funções de Persistência via GitHub API (PyGithub) ---
 
 def load_csv_github(url: str) -> pd.DataFrame | None:
@@ -121,7 +153,7 @@ def salvar_dados():
         
 def carregar_dados_do_csv(file_path, df_columns):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
-    df = pd.DataFrame(columns=df_columns) 
+    df = pd.DataFrame(columns=df_columns)  
     
     if PERSISTENCE_MODE == "GITHUB":
         url_raw = f"{URL_BASE_REPOS}{file_path}"
@@ -136,7 +168,7 @@ def carregar_dados_do_csv(file_path, df_columns):
             pass
             
     for col in df_columns:
-        if col not in df.columns: df[col] = "" 
+        if col not in df.columns: df[col] = ""  
         
     return df[df_columns]
 
@@ -161,7 +193,7 @@ def carregar_dados():
 
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        salvar_dados() 
+        salvar_dados()  
         
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
 
@@ -194,7 +226,7 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
     salvar_dados()
     st.session_state.editing_client = False
     st.success(f"Cadastro de '{nome_novo}' atualizado com sucesso!")
-    st.rerun() 
+    st.rerun()  
 
 
 def excluir_cliente(nome_cliente):
@@ -227,12 +259,14 @@ def cadastrar_cliente(nome, apelido, telefone):
         'Cashback Disponível': [0.00]
     })
     st.session_state.clientes = pd.concat([st.session_state.clientes, novo_cliente], ignore_index=True)
-    salvar_dados() 
+    salvar_dados()  
     st.success(f"Cliente '{nome}' cadastrado com sucesso!")
     st.rerun()
 
 def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
-    """Lança uma venda, atualiza o cashback do cliente e salva o CSV."""
+    """Lança uma venda, atualiza o cashback do cliente, salva e envia notificação ao Telegram."""
+    
+    # 1. Atualiza o saldo e registra o lançamento (Seu código original)
     st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'] += valor_cashback
     
     novo_lancamento = pd.DataFrame({
@@ -244,8 +278,43 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     })
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     
-    salvar_dados() 
+    salvar_dados()  
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome}. Cashback de R$ {valor_cashback:.2f} adicionado.")
+
+    # 2. Lógica de Envio para o Telegram (NOVO CÓDIGO)
+    if TELEGRAM_ENABLED:
+        
+        # Filtra SÓ as vendas para contar o histórico (o novo lançamento já está no DF)
+        vendas_do_cliente = st.session_state.lancamentos[
+            (st.session_state.lancamentos['Cliente'] == cliente_nome) & 
+            (st.session_state.lancamentos['Tipo'] == 'Venda')
+        ]
+        
+        # O número total de vendas é o tamanho desse filtro
+        numero_vendas_total = len(vendas_do_cliente)
+        
+        # Obtém o saldo atualizado
+        saldo_atualizado = st.session_state.clientes.loc[
+            st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'
+        ].iloc[0]
+        
+        # Formata para padrão brasileiro (R$ 1.000,00)
+        # Use o locale 'pt_BR' para formatação ideal, mas aqui fazemos manual:
+        valor_venda_str = f"R$ {valor_venda:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        cashback_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        saldo_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
+        # Monta a mensagem usando Markdown
+        mensagem_telegram = (
+            f"🔔 *NOVA VENDA LANÇADA - Doce&Bella* 🔔\n\n"
+            f"👤 *Cliente:* {cliente_nome}\n"
+            f"💸 *Valor da Venda:* {valor_venda_str}\n"
+            f"🎁 *Cashback Gerado:* {cashback_str}\n\n"
+            f"📊 *Total de Vendas:* *{numero_vendas_total}*\n"
+            f"💳 *Cashback Disponível:* *{saldo_str}*"
+        )
+        
+        enviar_mensagem_telegram(mensagem_telegram)
 
 def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resgate, saldo_disponivel):
     """Processa o resgate de cashback."""
@@ -272,7 +341,7 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     })
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     
-    salvar_dados() 
+    salvar_dados()  
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
 
 
@@ -282,8 +351,8 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
 
 # Configuração da página
 st.set_page_config(
-    layout="wide", 
-    page_title="Doce&Bella | Gestão Cashback", 
+    layout="wide",  
+    page_title="Doce&Bella | Gestão Cashback",  
     page_icon="🌸"
 )
 
@@ -394,8 +463,8 @@ def render_lancamento():
         with st.form("form_venda", clear_on_submit=True):
             clientes_nomes = [''] + st.session_state.clientes['Nome'].tolist()
             cliente_selecionado = st.selectbox(
-                "Nome da Cliente (Selecione ou digite para buscar):", 
-                options=clientes_nomes, 
+                "Nome da Cliente (Selecione ou digite para buscar):",  
+                options=clientes_nomes,  
                 index=0,
                 key='nome_cliente_venda'
             )
@@ -429,7 +498,7 @@ def render_lancamento():
         with st.form("form_resgate", clear_on_submit=True):
             
             cliente_resgate = st.selectbox(
-                "Cliente para Resgate:", 
+                "Cliente para Resgate:",  
                 options=clientes_options,
                 index=0,
                 key='nome_cliente_resgate'
@@ -438,18 +507,18 @@ def render_lancamento():
             saldo_atual = 0.00
             
             valor_venda_resgate = st.number_input(
-                "Valor da Venda Atual (para cálculo do limite de 50%):", 
-                min_value=0.01, 
-                step=50.0, 
-                format="%.2f", 
+                "Valor da Venda Atual (para cálculo do limite de 50%):",  
+                min_value=0.01,  
+                step=50.0,  
+                format="%.2f",  
                 key='valor_venda_resgate'
             )
             
             valor_resgate = st.number_input(
-                "Valor do Resgate (Mínimo R$20,00):", 
-                min_value=0.00, 
-                step=1.00, 
-                format="%.2f", 
+                "Valor do Resgate (Mínimo R$20,00):",  
+                min_value=0.00,  
+                step=1.00,  
+                format="%.2f",  
                 key='valor_resgate'
             )
             
@@ -535,14 +604,14 @@ def render_cadastro():
         with col_edicao:
             if st.button("✏️ Editar Cadastro", use_container_width=True, key='btn_editar'):
                 st.session_state.editing_client = cliente_selecionado_operacao
-                st.session_state.deleting_client = False 
-                st.rerun() 
+                st.session_state.deleting_client = False  
+                st.rerun()  
         
         with col_exclusao:
             if st.button("🗑️ Excluir Cliente", use_container_width=True, key='btn_excluir', type='primary'):
                 st.session_state.deleting_client = cliente_selecionado_operacao
-                st.session_state.editing_client = False 
-                st.rerun() 
+                st.session_state.editing_client = False  
+                st.rerun()  
         
         st.markdown("---")
         
@@ -551,17 +620,17 @@ def render_cadastro():
             
             with st.form("form_edicao_cliente", clear_on_submit=False):
                 
-                novo_nome = st.text_input("Nome (Chave de Identificação):", 
-                                          value=cliente_data['Nome'], 
+                novo_nome = st.text_input("Nome (Chave de Identificação):",  
+                                          value=cliente_data['Nome'],  
                                           key='edicao_nome')
                 
-                novo_apelido = st.text_input("Apelido ou Descrição:", 
-                                            value=cliente_data['Apelido/Descrição'], 
-                                            key='edicao_apelido')
+                novo_apelido = st.text_input("Apelido ou Descrição:",  
+                                             value=cliente_data['Apelido/Descrição'],  
+                                             key='edicao_apelido')
                 
-                novo_telefone = st.text_input("Número de Telefone:", 
-                                             value=cliente_data['Telefone'], 
-                                             key='edicao_telefone')
+                novo_telefone = st.text_input("Número de Telefone:",  
+                                              value=cliente_data['Telefone'],  
+                                              key='edicao_telefone')
                 
                 st.info(f"Cashback Disponível: R$ {cliente_data['Cashback Disponível']:.2f} (Não editável)")
 
@@ -588,7 +657,7 @@ def render_cadastro():
             with col_cancela_del:
                 if st.button("↩️ Cancelar Exclusão", use_container_width=True, key='cancelar_exclusao'):
                     st.session_state.deleting_client = False
-                    st.rerun() 
+                    st.rerun()  
         
     st.markdown("---")
     st.subheader("Clientes Cadastrados (Visualização)")
@@ -604,7 +673,7 @@ def render_relatorios():
     # --- Ranking de Cashback ---
     st.subheader("🏆 Ranking: Maior Saldo de Cashback")
     ranking_cashback = st.session_state.clientes.sort_values(by='Cashback Disponível', ascending=False).reset_index(drop=True)
-    ranking_cashback.index += 1 
+    ranking_cashback.index += 1  
     st.dataframe(ranking_cashback[['Nome', 'Cashback Disponível']], use_container_width=True)
     st.markdown("---")
 
@@ -732,13 +801,13 @@ def render_header():
     with col_logo:
         st.markdown(f'''
             <div class="logo-container">
-                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 200px;"> 
+                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 200px;">  
             </div>
         ''', unsafe_allow_html=True)
         
     with col_nav:
         # A barra rosa forte onde os botões se apoiam
-        st.markdown('<div style="height: 5px; background-color: #E91E63;"></div>', unsafe_allow_html=True) 
+        st.markdown('<div style="height: 5px; background-color: #E91E63;"></div>', unsafe_allow_html=True)  
         
         # Container de botões (Horizontal)
         cols_botoes = st.columns([1] * len(PAGINAS))
@@ -750,12 +819,12 @@ def render_header():
                 is_active = st.session_state.pagina_atual == nome
                 
                 # Usa uma classe CSS para o estado ativo
-                button_class = "active-nav-button" if is_active else ""
+                # O Streamlit substitui a classe, então a injeção JS/HTML é necessária para manter o estilo
                 
                 if cols_botoes[i].button(
-                    nome, 
-                    key=f"nav_{nome}", 
-                    use_container_width=True, 
+                    nome,  
+                    key=f"nav_{nome}",  
+                    use_container_width=True,  
                     help=f"Ir para {nome}"
                 ):
                     st.session_state.pagina_atual = nome
@@ -765,9 +834,11 @@ def render_header():
                 if is_active:
                     st.markdown(f"""
                         <script>
-                            var button = window.parent.document.querySelector('button[kind="secondary"][data-testid^="stHorizontalBlock"]');
-                            if (button) {{
-                                button.classList.add('active-nav-button');
+                            // Tenta encontrar o último botão criado no stHorizontalBlock e aplica a classe
+                            var buttons = window.parent.document.querySelectorAll('div[data-testid^="stHorizontalBlock"] button');
+                            var lastButton = buttons[buttons.length - {len(PAGINAS) - i}];
+                            if (lastButton) {{
+                                lastButton.classList.add('active-nav-button');
                             }}
                         </script>
                     """, unsafe_allow_html=True)
