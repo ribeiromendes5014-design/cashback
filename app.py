@@ -353,6 +353,11 @@ st.markdown("""
         /* CORREÇÃO: Removendo o fundo branco para que o PNG transparente combine com o fundo da página */
         background-color: transparent; 
     }
+    
+    /* Ajuste de cor do st.metric */
+    div[data-testid="stMetricValue"] {
+        color: #E91E63 !important; 
+    }
 
     </style>
 """, unsafe_allow_html=True)
@@ -371,6 +376,21 @@ def render_lancamento():
     if operacao == "Lançar Nova Venda":
         st.subheader("Nova Venda (Cashback de 3%)")
         
+        # 1. MOVIDO PARA FORA DO FORM: Valor da Venda (para cálculo em tempo real)
+        # O widget number_input fora do form atualiza a session_state a cada interação, 
+        # forçando o rerun e o recálculo do cashback.
+        valor_venda = st.number_input("Valor da Venda (R$):", min_value=0.00, step=50.0, format="%.2f", key='valor_venda')
+        
+        # Inicializa o estado se for o primeiro acesso
+        if 'valor_venda' not in st.session_state:
+            st.session_state.valor_venda = 0.00
+            
+        # 2. CÁLCULO INSTANTÂNEO
+        cashback_calculado = st.session_state.valor_venda * CASHBACK_PERCENTUAL
+        
+        # 3. EXIBIÇÃO INSTANTÂNEA
+        st.metric(label=f"Cashback a Gerar ({int(CASHBACK_PERCENTUAL * 100)}%):", value=f"R$ {cashback_calculado:.2f}")
+        
         with st.form("form_venda", clear_on_submit=True):
             clientes_nomes = [''] + st.session_state.clientes['Nome'].tolist()
             cliente_selecionado = st.selectbox(
@@ -380,22 +400,25 @@ def render_lancamento():
                 key='nome_cliente_venda'
             )
             
-            valor_venda = st.number_input("Valor da Venda (R$):", min_value=0.01, step=50.0, format="%.2f", key='valor_venda')
-            
-            cashback_calculado = valor_venda * CASHBACK_PERCENTUAL
-            st.metric(label="Cashback a Gerar (3%):", value=f"R$ {cashback_calculado:.2f}")
+            st.caption(f"Valor da Venda a ser lançado: **R$ {st.session_state.valor_venda:.2f}**")
             
             data_venda = st.date_input("Data da Venda:", value=date.today(), key='data_venda')
             
             submitted_venda = st.form_submit_button("Lançar Venda e Gerar Cashback")
             
             if submitted_venda:
+                # Usa os valores recalculados no momento da submissão
+                lancamento_valor_venda = st.session_state.valor_venda
+                lancamento_cashback = lancamento_valor_venda * CASHBACK_PERCENTUAL
+                
                 if cliente_selecionado == '':
                     st.error("Por favor, selecione ou digite o nome de uma cliente.")
+                elif lancamento_valor_venda <= 0.00:
+                    st.error("O valor da venda deve ser maior que R$ 0,00.")
                 elif cliente_selecionado not in st.session_state.clientes['Nome'].values:
                     st.warning("Cliente não encontrado. Por favor, cadastre-o primeiro na seção 'Cadastro'.")
                 else:
-                    lancar_venda(cliente_selecionado, valor_venda, cashback_calculado, data_venda)
+                    lancar_venda(cliente_selecionado, lancamento_valor_venda, lancamento_cashback, data_venda)
 
     elif operacao == "Resgatar Cashback":
         st.subheader("Resgate de Cashback")
@@ -452,7 +475,12 @@ def render_lancamento():
                 elif valor_resgate <= 0:
                     st.error("O valor do resgate deve ser maior que zero.")
                 else:
-                    resgatar_cashback(cliente_resgate, valor_resgate, valor_venda_resgate, data_resgate, saldo_atual)
+                    # Recalcula saldo atual para garantir que o saldo_disponivel passado à função esteja correto
+                    if cliente_resgate in st.session_state.clientes['Nome'].values:
+                        saldo_atual = st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_resgate, 'Cashback Disponível'].iloc[0]
+                        resgatar_cashback(cliente_resgate, valor_resgate, valor_venda_resgate, data_resgate, saldo_atual)
+                    else:
+                        st.error("Erro ao calcular saldo. Cliente não encontrado.")
 
 
 def render_cadastro():
@@ -528,12 +556,12 @@ def render_cadastro():
                                           key='edicao_nome')
                 
                 novo_apelido = st.text_input("Apelido ou Descrição:", 
-                                             value=cliente_data['Apelido/Descrição'], 
-                                             key='edicao_apelido')
+                                            value=cliente_data['Apelido/Descrição'], 
+                                            key='edicao_apelido')
                 
                 novo_telefone = st.text_input("Número de Telefone:", 
-                                              value=cliente_data['Telefone'], 
-                                              key='edicao_telefone')
+                                             value=cliente_data['Telefone'], 
+                                             key='edicao_telefone')
                 
                 st.info(f"Cashback Disponível: R$ {cliente_data['Cashback Disponível']:.2f} (Não editável)")
 
@@ -760,6 +788,9 @@ if 'deleting_client' not in st.session_state:
     st.session_state.deleting_client = False
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
+# Garante que o valor da venda para cálculo instantâneo esteja pronto
+if 'valor_venda' not in st.session_state:
+    st.session_state.valor_venda = 0.00
 
 
 # 3. Carregamento: Só chama carregar_dados() se os dados ainda não foram carregados na sessão.
@@ -774,5 +805,3 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
-
