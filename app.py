@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
-from datetime import date
+# Mude a importação de date para incluir datetime
+from datetime import date, datetime  
 import requests
 from io import StringIO
 import io, os
 import base64
+import pytz 
 
 # Tenta importar PyGithub para persistência.
 try:
@@ -889,5 +891,6 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
 
