@@ -343,8 +343,13 @@ def excluir_lancamento_venda(lancamento_index: int):
         return
 
     cliente_nome = lancamento['Cliente']
-    valor_venda = pd.to_numeric(lancamento['Valor Venda/Resgate'], errors='coerce', default=0)
-    valor_cashback = pd.to_numeric(lancamento['Valor Cashback'], errors='coerce', default=0)
+    
+    # --- CORREÇÃO APLICADA AQUI ---
+    temp_venda = pd.to_numeric(lancamento['Valor Venda/Resgate'], errors='coerce')
+    temp_cashback = pd.to_numeric(lancamento['Valor Cashback'], errors='coerce')
+    valor_venda = temp_venda if pd.notna(temp_venda) else 0
+    valor_cashback = temp_cashback if pd.notna(temp_cashback) else 0
+    # --- FIM DA CORREÇÃO ---
 
     # Reverter dados do cliente
     idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
@@ -566,7 +571,6 @@ def render_relatorios():
         st.dataframe(df_historico.sort_values(by="Data", ascending=False), hide_index=True, use_container_width=True)
     else: st.info("Nenhum lançamento encontrado com os filtros selecionados.")
     
-    # --- NOVA SEÇÃO: EXCLUIR VENDA ---
     st.markdown("---")
     st.subheader("🗑️ Excluir Lançamento de Venda")
     vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda'].copy()
