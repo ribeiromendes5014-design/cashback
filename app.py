@@ -624,9 +624,22 @@ def render_home():
     total_clientes = len(st.session_state.clientes)
     total_cashback_pendente = st.session_state.clientes['Cashback Disponível'].sum()
     
-    # Filtra vendas e calcula o volume
+    # Filtra vendas
     vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda']
-    total_vendas_mes = vendas_df[vendas_df['Data'].apply(lambda x: x.month == date.today().month if pd.notna(x) else False)]['Valor Venda/Resgate'].sum()
+    
+    total_vendas_mes = 0.0
+    # CORREÇÃO: Verifica se o DataFrame de vendas está vazio antes de tentar filtrar por data e calcular a soma.
+    if not vendas_df.empty:
+        vendas_mes = vendas_df[
+            vendas_df['Data'].apply(
+                # Garante que x seja pd.NaT (not a time) ou date object.
+                lambda x: x.month == date.today().month if pd.notna(x) else False
+            )
+        ]
+        # Soma apenas se o DataFrame do mês não estiver vazio
+        if not vendas_mes.empty:
+            total_vendas_mes = vendas_mes['Valor Venda/Resgate'].sum()
+
 
     col1, col2, col3 = st.columns(3)
     
