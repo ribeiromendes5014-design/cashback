@@ -17,7 +17,7 @@ except ImportError:
         def get_repo(self, repo_name): return self
         def get_contents(self, path, ref): return type('Contents', (object,), {'sha': 'dummy_sha'})
         def update_file(self, path, msg, content, sha, branch): pass
-        def create_file(self, path, msg, content, branch): pass
+        def create_file(self, path, msg, content, sha, branch): pass
 
 # --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
@@ -25,7 +25,8 @@ LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
 # Configuração do logo para o novo layout
-LOGO_DOCEBELLA_URL = "https://i.ibb.co/fYCWBKTm/Logo-Doce-Bella-Cosm-tico.png" # Novo link para o logo
+LOGO_DOCEBELLA_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" # Link do logo
+LOGO_ALT_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" 
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -97,8 +98,10 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         try:
             contents = repo.get_contents(file_path, ref=BRANCH)
             repo.update_file(contents.path, commit_message, csv_string, contents.sha, branch=BRANCH)
+            st.toast(f"✅ Arquivo {file_path} salvo no GitHub.")
         except Exception:
             repo.create_file(file_path, commit_message, csv_string, branch=BRANCH)
+            st.toast(f"✅ Arquivo {file_path} criado no GitHub.")
 
         return True
 
@@ -151,6 +154,13 @@ def carregar_dados():
         LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
     )
     
+    # Adiciona a inicialização de DF vazio para evitar erro no primeiro acesso
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
+    if 'lancamentos' not in st.session_state:
+        st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
+
+
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
         salvar_dados() 
@@ -577,6 +587,7 @@ def render_relatorios():
     
     vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda'].copy()
     if not vendas_df.empty:
+        vendas_df['Valor Venda/Resgate'] = pd.to_numeric(vendas_df['Valor Venda/Resgate'], errors='coerce').fillna(0)
         ranking_compras = vendas_df.groupby('Cliente')['Valor Venda/Resgate'].sum().reset_index()
         ranking_compras.columns = ['Cliente', 'Total Compras (R$)']
         ranking_compras = ranking_compras.sort_values(by='Total Compras (R$)', ascending=False).reset_index(drop=True)
@@ -739,7 +750,7 @@ def render_header():
 
 # Inicialização e Carregamento de Dados
 # 1. Inicializa o estado da sessão para evitar o erro 'AttributeError: 'st._SessionStateProxy' object has no attribute 'clientes''
-if 'clientes' not in st.session_state:
+if 'clientes' not in st.session_state or 'lancamentos' not in st.session_state:
     carregar_dados()
 
 # 2. Garante que as variáveis de estado de edição e deleção existam
