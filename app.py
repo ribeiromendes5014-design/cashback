@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
-# Mude a importação de date para incluir datetime
-from datetime import date, datetime  
+from datetime import date, datetime
 import requests
 from io import StringIO
 import io, os
 import base64
-import pytz  # Adicionado para o fuso horário correto
+import pytz
 
 # Tenta importar PyGithub para persistência.
 try:
@@ -24,10 +23,37 @@ except ImportError:
 # --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
-CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
+CASHBACK_PERCENTUAL = 0.03 # Taxa base Padrão (agora só para Nível Prata)
+BONUS_INDICACAO_PERCENTUAL = 0.05 # 5% para o indicador
+CASHBACK_INDICADO_PRIMEIRA_COMPRA = 0.08 # 8% para o indicado
 
 # Configuração do logo para o novo layout
 LOGO_DOCEBELLA_URL = "https://i.ibb.co/fYCWBKTm/Logo-Doce-Bella-Cosm-tico.png" # Link do logo
+
+# --- Definição dos Níveis ---
+NIVEIS = {
+    'Prata': {
+        'min_gasto': 0.00, 
+        'max_gasto': 200.00, 
+        'cashback_normal': 0.03, # 3%
+        'cashback_turbo': 0.00, # Não tem
+        'proximo_nivel': 'Ouro'
+    },
+    'Ouro': {
+        'min_gasto': 200.01, 
+        'max_gasto': 1000.00, 
+        'cashback_normal': 0.07, # 7%
+        'cashback_turbo': 0.10, # 10%
+        'proximo_nivel': 'Diamante'
+    },
+    'Diamante': {
+        'min_gasto': 1000.01, 
+        'max_gasto': float('inf'), 
+        'cashback_normal': 0.15, # 15%
+        'cashback_turbo': 0.20, # 20%
+        'proximo_nivel': 'Max'
+    }
+}
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -65,7 +91,7 @@ if PERSISTENCE_MODE == "GITHUB":
     URL_BASE_REPOS = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/"
 
 
-# --- Configuração e Função do Telegram ---
+# --- Configuração e Função do Telegram (MANTIDO O MESMO) ---
 try:
     TELEGRAM_BOT_ID = st.secrets["telegram"]["BOT_ID"]
     TELEGRAM_CHAT_ID = st.secrets["telegram"]["CHAT_ID"]
@@ -99,17 +125,12 @@ def enviar_mensagem_telegram(mensagem: str):
         pass 
 
 
-# --- Funções de Persistência via GitHub API (PyGithub) ---
+# --- Funções de Persistência via GitHub API (PyGithub) (MANTIDO O MESMO) ---
 
-def load_csv_github(url: str, version_key: int) -> pd.DataFrame | None:
-    """Carrega um CSV do GitHub usando a URL raw, forçando o cachebuster."""
-    
-    # Adiciona o cachebuster à URL para garantir que o requests faça uma nova requisição
-    url_with_cachebuster = f"{url}?v={version_key}"
-    
+def load_csv_github(url: str) -> pd.DataFrame | None:
+    """Carrega um CSV do GitHub usando a URL raw."""
     try:
-        # A nova URL força o requests a ignorar seu cache interno
-        response = requests.get(url_with_cachebuster, timeout=10)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         df = pd.read_csv(StringIO(response.text), dtype=str)
         if df.empty or len(df.columns) < 2:
@@ -149,17 +170,18 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
         return False
 
-# --- Funções de Carregamento/Salvamento (CORRIGIDO PARA CACHE) ---
+# --- Funções de Carregamento/Salvamento (MANTIDO O MESMO) ---
 
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
     
-    # 🟢 CORREÇÃO: Limpamos o cache e, mais importante, incrementamos a chave de versão.
+    # 🟢 CORREÇÃO 1: Limpa o cache para forçar a releitura dos CSVs.
     st.cache_data.clear() 
 
+    # 🟢 CORREÇÃO 2: Incrementa a chave de estado para invalidar o cache pela assinatura da função.
     if 'data_version' not in st.session_state:
         st.session_state.data_version = 0
-    st.session_state.data_version += 1 # Garante que o argumento mude para o cache invalidar
+    st.session_state.data_version += 1
 
     if PERSISTENCE_MODE == "GITHUB":
         salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
@@ -168,14 +190,13 @@ def salvar_dados():
         st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
         
-def carregar_dados_do_csv(file_path, df_columns, version_key):
+def carregar_dados_do_csv(file_path, df_columns):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
     df = pd.DataFrame(columns=df_columns)  
     
     if PERSISTENCE_MODE == "GITHUB":
         url_raw = f"{URL_BASE_REPOS}{file_path}"
-        # CORREÇÃO: Passa a chave de versão para load_csv_github
-        df_carregado = load_csv_github(url_raw, version_key) 
+        df_carregado = load_csv_github(url_raw)
         if df_carregado is not None:
             df = df_carregado
         
@@ -185,40 +206,95 @@ def carregar_dados_do_csv(file_path, df_columns, version_key):
         except pd.errors.EmptyDataError:
             pass
             
+    # Garante que todas as colunas existem
     for col in df_columns:
-        if col not in df.columns: df[col] = ""  
+        if col not in df.columns: 
+            # Inicializa colunas que devem ser numéricas como 0.0
+            if col in ['Cashback Disponível', 'Gasto Acumulado']:
+                df[col] = 0.0
+            # Inicializa colunas booleanas como False
+            elif col in ['Primeira Compra Feita']:
+                df[col] = False
+            else:
+                df[col] = ""  
         
     return df[df_columns]
 
 @st.cache_data(show_spinner="Carregando dados...")
-# CORREÇÃO CRÍTICA: A função agora retorna TUDO em um dicionário
-def carregar_dados(data_version_key): 
-    """Carrega os DataFrames e retorna-os, garantindo que o cache seja mantido."""
+def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
+    """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    clientes_df = carregar_dados_do_csv(
-        CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'], data_version_key
+    # 🟢 NOVO: Colunas adicionadas para o sistema de níveis e indicação
+    CLIENTES_COLS = [
+        'Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível',
+        'Gasto Acumulado', 'Nivel Atual', 'Indicado Por', 'Primeira Compra Feita'
+    ]
+    
+    st.session_state.clientes = carregar_dados_do_csv(CLIENTES_CSV, CLIENTES_COLS)
+    
+    st.session_state.lancamentos = carregar_dados_do_csv(
+        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
     )
     
-    lancamentos_df = carregar_dados_do_csv(
-        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'], data_version_key
-    )
-    
-    # Processamento de limpeza e inicialização dos DFs lidos:
-    if clientes_df.empty:
-        # Cria um cliente de exemplo se o DF estiver vazio
-        clientes_df.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        # NOTA: Não chamamos salvar_dados() aqui para evitar recursão infinita no primeiro load.
-        
-    clientes_df['Cashback Disponível'] = pd.to_numeric(clientes_df['Cashback Disponível'], errors='coerce').fillna(0.0)
+    # Adiciona a inicialização de DF vazio para evitar erro no primeiro acesso
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS)
+    if 'lancamentos' not in st.session_state:
+        st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
 
-    if not lancamentos_df.empty:
-        lancamentos_df['Data'] = pd.to_datetime(lancamentos_df['Data'], errors='coerce').dt.date
+
+    if st.session_state.clientes.empty:
+        # Cria um cliente de exemplo se o DF estiver vazio
+        st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00, 0.00, 'Prata', '', False]
+        salvar_dados()  # Salva para criar os arquivos iniciais no GitHub/Local
+        
+    # Converte tipos de dados
+    st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
+    st.session_state.clientes['Gasto Acumulado'] = pd.to_numeric(st.session_state.clientes['Gasto Acumulado'], errors='coerce').fillna(0.0)
+    st.session_state.clientes['Primeira Compra Feita'] = st.session_state.clientes['Primeira Compra Feita'].astype(bool)
+
+
+    if not st.session_state.lancamentos.empty:
+        st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
     
-    # 🟢 NOVO: Retorna o dicionário com os DataFrames
-    return {
-        'clientes': clientes_df,
-        'lancamentos': lancamentos_df
-    }
+
+# --- Funções do Programa de Fidelidade ---
+
+def calcular_nivel_e_beneficios(gasto_acumulado: float) -> tuple[str, float, float]:
+    """Calcula o nível, cashback normal e turbo com base no gasto acumulado."""
+    
+    # Inicializa com o nível base
+    nivel = 'Prata'
+    cb_normal = NIVEIS['Prata']['cashback_normal']
+    cb_turbo = NIVEIS['Prata']['cashback_turbo']
+    
+    if gasto_acumulado >= NIVEIS['Diamante']['min_gasto']:
+        nivel = 'Diamante'
+        cb_normal = NIVEIS['Diamante']['cashback_normal']
+        cb_turbo = NIVEIS['Diamante']['cashback_turbo']
+    elif gasto_acumulado >= NIVEIS['Ouro']['min_gasto']:
+        nivel = 'Ouro'
+        cb_normal = NIVEIS['Ouro']['cashback_normal']
+        cb_turbo = NIVEIS['Ouro']['cashback_turbo']
+    
+    return nivel, cb_normal, cb_turbo
+
+def calcular_falta_para_proximo_nivel(gasto_acumulado: float, nivel_atual: str) -> float:
+    """Calcula quanto falta para o próximo nível."""
+    if nivel_atual == 'Diamante':
+        return 0.0 # Nível máximo
+        
+    proximo_nivel_nome = NIVEIS[nivel_atual]['proximo_nivel']
+    
+    if proximo_nivel_nome == 'Max':
+         return 0.0
+
+    proximo_nivel_min = NIVEIS[proximo_nivel_nome]['min_gasto']
+    
+    if proximo_nivel_min > gasto_acumulado:
+        return proximo_nivel_min - gasto_acumulado
+    else:
+        return 0.0 # Já atingiu o requisito, mas o nível não foi atualizado (será atualizado na próxima venda)
 
 
 # --- Funções de Manipulação de Clientes e Transações ---
@@ -252,7 +328,6 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
 def excluir_cliente(nome_cliente):
     """Exclui o cliente e todas as suas transações, depois salva."""
     
-    # 1. Remove da memória
     st.session_state.clientes = st.session_state.clientes[
         st.session_state.clientes['Nome'] != nome_cliente
     ].reset_index(drop=True)
@@ -261,42 +336,96 @@ def excluir_cliente(nome_cliente):
         st.session_state.lancamentos['Cliente'] != nome_cliente
     ].reset_index(drop=True)
     
-    # 2. Salva no GitHub e limpa o cache (incluindo o incremento da chave de versão)
     salvar_dados()
-    
-    # 3. CORREÇÃO: Remove o estado de exclusão e edição para forçar a atualização visual
-    if 'deleting_client' in st.session_state:
-        del st.session_state.deleting_client
-    if 'editing_client' in st.session_state:
-        del st.session_state.editing_client
-    
+    st.session_state.deleting_client = False
     st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
-    st.rerun() # Força a reexecução, que usará a nova 'data_version' para recarregar do GitHub
+    st.rerun()
 
 
-def cadastrar_cliente(nome, apelido, telefone):
+def cadastrar_cliente(nome, apelido, telefone, indicado_por=''):
     """Adiciona um novo cliente ao DataFrame de clientes e salva o CSV."""
     if nome in st.session_state.clientes['Nome'].values:
         st.error("Erro: Já existe um cliente com este nome.")
         return False
+    
+    # Validação do Indicador
+    if indicado_por and indicado_por not in st.session_state.clientes['Nome'].values:
+         st.warning(f"Atenção: Cliente indicador '{indicado_por}' não encontrado. O bônus não será aplicado.")
+         indicado_por = '' # Zera o campo se o indicador não existir
         
     novo_cliente = pd.DataFrame({
         'Nome': [nome],
         'Apelido/Descrição': [apelido],
         'Telefone': [telefone],
-        'Cashback Disponível': [0.00]
+        'Cashback Disponível': [0.00],
+        'Gasto Acumulado': [0.00],
+        'Nivel Atual': ['Prata'],
+        'Indicado Por': [indicado_por],
+        'Primeira Compra Feita': [False]
     })
     st.session_state.clientes = pd.concat([st.session_state.clientes, novo_cliente], ignore_index=True)
     salvar_dados()  
-    st.success(f"Cliente '{nome}' cadastrado com sucesso!")
+    st.success(f"Cliente '{nome}' cadastrado com sucesso! Nível inicial: Prata.")
     st.rerun()
 
 def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
-    """Lança uma venda, atualiza o cashback do cliente, salva e envia notificação ao Telegram."""
+    """Lança uma venda, atualiza o cashback do cliente e do indicador, salva e envia notificação."""
     
-    # 1. Atualiza o saldo e registra o lançamento
-    st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'] += valor_cashback
+    idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
     
+    if idx_cliente.empty:
+        st.error(f"Erro: Cliente '{cliente_nome}' não encontrado.")
+        return
+
+    cliente_data = st.session_state.clientes.loc[idx_cliente].iloc[0]
+    
+    # ------------------------------------
+    # 1. ATUALIZAÇÕES DO CLIENTE INDICADO
+    # ------------------------------------
+    
+    # Atualiza o saldo do cliente
+    st.session_state.clientes.loc[idx_cliente, 'Cashback Disponível'] += valor_cashback
+    
+    # Atualiza o gasto acumulado
+    st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'] += valor_venda
+    
+    # Recalcula o Nível com o novo gasto acumulado
+    novo_gasto_acumulado = st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'].iloc[0]
+    novo_nivel, _, _ = calcular_nivel_e_beneficios(novo_gasto_acumulado)
+    st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
+    
+    # Marca a primeira compra como feita
+    st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = True
+    
+    # ------------------------------------
+    # 2. LOGICA DO INDIQUE E GANHE (BÔNUS PARA O INDICADOR)
+    # ------------------------------------
+    bonus_para_indicador = 0.0
+    
+    # Apenas se for a PRIMEIRA compra E houver um indicador
+    if not cliente_data['Primeira Compra Feita'] and cliente_data['Indicado Por']:
+        indicador_nome = cliente_data['Indicado Por']
+        idx_indicador = st.session_state.clientes[st.session_state.clientes['Nome'] == indicador_nome].index
+        
+        if not idx_indicador.empty:
+            bonus_para_indicador = valor_venda * BONUS_INDICACAO_PERCENTUAL # 5% do valor da venda do indicado
+            st.session_state.clientes.loc[idx_indicador, 'Cashback Disponível'] += bonus_para_indicador
+            
+            # Adiciona o lançamento do bônus ao histórico
+            lancamento_bonus = pd.DataFrame({
+                'Data': [data_venda],
+                'Cliente': [indicador_nome],
+                'Tipo': ['Bônus Indicação'],
+                'Valor Venda/Resgate': [valor_venda],
+                'Valor Cashback': [bonus_para_indicador]
+            })
+            st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, lancamento_bonus], ignore_index=True)
+            st.success(f"🎁 Bônus de Indicação de R$ {bonus_para_indicador:.2f} creditado para **{indicador_nome}**!")
+
+
+    # ------------------------------------
+    # 3. REGISTRA O LANÇAMENTO DO INDICADO
+    # ------------------------------------
     novo_lancamento = pd.DataFrame({
         'Data': [data_venda],
         'Cliente': [cliente_nome],
@@ -307,9 +436,9 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     
     salvar_dados()  
-    st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome}. Cashback de R$ {valor_cashback:.2f} adicionado.")
+    st.success(f"Venda de R$ {valor_venda:.2f} lançada para **{cliente_nome}** ({novo_nivel}). Cashback de R$ {valor_cashback:.2f} adicionado.")
 
-    # 2. Lógica de Envio para o Telegram
+    # 4. Lógica de Envio para o Telegram (MANTIDO O MESMO)
     if TELEGRAM_ENABLED:
         
         # Filtra SÓ as vendas (incluindo a atual)
@@ -335,13 +464,12 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         cashback_ganho_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
-        # Monta a mensagem final completa, começando com a novidade do Programa de Fidelidade.
+        # Monta a mensagem final completa, adaptada para NÍVEL
         mensagem_telegram = (
-            # --- PARTE 1: Introdução sobre o Programa de Fidelidade ---
+            # --- PARTE 1: Introdução sobre a Novidade do Programa de Fidelidade ---
             "✨ Novidade imperdível na Doce&Bella! ✨\n\n"
             "Agora você pode aproveitar ainda mais as suas compras favoritas com o nosso Programa de Fidelidade 🛍💖\n\n"
-            "➡ A cada compra, você acumula pontos.\n"
-            "➡ Quanto mais você compra, mais descontos exclusivos você ganha!\n\n"
+            f"Você está no **NÍVEL {novo_nivel.upper()}**!\n\n"
             
             # --- PARTE 2: Mensagem de Cashback e Saldo ---
             f"🎉 *PARABÉNS, {cliente_nome.upper()}! VOCÊ GANHOU CASHBACK!* 🎉\n\n"
@@ -403,7 +531,7 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     salvar_dados()  
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
 
-    # --- 3. Lógica de Envio para o Telegram ---
+    # --- 3. Lógica de Envio para o Telegram (MANTIDO O MESMO) ---
     if TELEGRAM_ENABLED:
         
         # --- Fuso Horário Brasil ---
@@ -510,6 +638,20 @@ st.markdown("""
         color: #E91E63 !important;  
     }
 
+    /* Estilo para destaque de Nível */
+    .nivel-diamante {
+        color: #3f51b5; /* Azul */
+        font-weight: bold;
+    }
+    .nivel-ouro {
+        color: #ffc107; /* Amarelo */
+        font-weight: bold;
+    }
+    .nivel-prata {
+        color: #607d8b; /* Cinza */
+        font-weight: bold;
+    }
+
     </style>
 """, unsafe_allow_html=True)
 
@@ -525,31 +667,68 @@ def render_lancamento():
 
     # (CÓDIGO DA ABA 1 - Lançamento)
     if operacao == "Lançar Nova Venda":
-        st.subheader("Nova Venda (Cashback de 3%)")
+        st.subheader("Nova Venda (Cashback por Nível)")
         
-        # 1. MOVIDO PARA FORA DO FORM: Valor da Venda (para cálculo em tempo real)
+        clientes_nomes = [''] + st.session_state.clientes['Nome'].tolist()
+        cliente_selecionado = st.selectbox(
+            "Nome da Cliente (Selecione ou digite para buscar):",  
+            options=clientes_nomes,  
+            index=0,
+            key='nome_cliente_venda'
+        )
+        
+        # 1. Variáveis de Nível
+        nivel_cliente = 'Prata'
+        cb_normal_rate = NIVEIS['Prata']['cashback_normal']
+        cb_turbo_rate = NIVEIS['Prata']['cashback_turbo']
+        gasto_acumulado = 0.00
+        primeira_compra_feita = True # Assume True se não for encontrado
+        
+        # 2. Busca e Calcula Nível/Benefícios (Executa se o cliente for selecionado)
+        if cliente_selecionado and cliente_selecionado in st.session_state.clientes['Nome'].values:
+            cliente_data = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_selecionado].iloc[0]
+            gasto_acumulado = cliente_data['Gasto Acumulado']
+            primeira_compra_feita = cliente_data['Primeira Compra Feita']
+            
+            # Garante que o nível exibido está correto
+            nivel_cliente, cb_normal_rate, cb_turbo_rate = calcular_nivel_e_beneficios(gasto_acumulado)
+
+            # --- Exibição de Nível e Taxas ---
+            
+            # Sobrescreve para Indicação
+            if not primeira_compra_feita and cliente_data['Indicado Por']:
+                taxa_aplicada = CASHBACK_INDICADO_PRIMEIRA_COMPRA
+                st.info(f"✨ **INDICAÇÃO ATIVA!** Cliente na primeira compra com indicação. Cashback de **{int(taxa_aplicada * 100)}%** aplicado.")
+                cb_normal_rate = taxa_aplicada
+                cb_turbo_rate = taxa_aplicada # Usa a mesma taxa
+                
+            col_info1, col_info2, col_info3 = st.columns(3)
+            col_info1.metric("Nível Atual", nivel_cliente)
+            col_info2.metric("Cashback Normal", f"{int(cb_normal_rate * 100)}%")
+            if cb_turbo_rate > 0:
+                col_info3.metric("Cashback Turbo", f"{int(cb_turbo_rate * 100)}%")
+            else:
+                col_info3.metric("Cashback Turbo", "Indisponível")
+            
+            st.markdown("---") # Separador visual
+
+        
+        # 3. MOVIDO PARA FORA DO FORM: Valor da Venda (para cálculo em tempo real)
         valor_venda = st.number_input("Valor da Venda (R$):", min_value=0.00, step=50.0, format="%.2f", key='valor_venda')
         
-        # Inicializa o estado se for o primeiro acesso
-        if 'valor_venda' not in st.session_state:
-            st.session_state.valor_venda = 0.00
-            
-        # 2. CÁLCULO INSTANTÂNEO
-        cashback_calculado = st.session_state.valor_venda * CASHBACK_PERCENTUAL
+        # Campo para Turbo
+        venda_turbo = st.checkbox("Esta venda contém **Produtos Turbo**?", key='venda_turbo')
+
+        # CÁLCULO INSTANTÂNEO
+        taxa_final = cb_turbo_rate if venda_turbo and cb_turbo_rate > 0 else cb_normal_rate
+        cashback_calculado = st.session_state.valor_venda * taxa_final
         
-        # 3. EXIBIÇÃO INSTANTÂNEA
-        st.metric(label=f"Cashback a Gerar ({int(CASHBACK_PERCENTUAL * 100)}%):", value=f"R$ {cashback_calculado:.2f}")
+        # EXIBIÇÃO INSTANTÂNEA
+        st.metric(label=f"Cashback a Gerar (Taxa Aplicada: {int(taxa_final * 100)}%):", value=f"R$ {cashback_calculado:.2f}")
         
         with st.form("form_venda", clear_on_submit=True):
-            clientes_nomes = [''] + st.session_state.clientes['Nome'].tolist()
-            cliente_selecionado = st.selectbox(
-                "Nome da Cliente (Selecione ou digite para buscar):",  
-                options=clientes_nomes,  
-                index=0,
-                key='nome_cliente_venda'
-            )
             
-            st.caption(f"Valor da Venda a ser lançado: **R$ {st.session_state.valor_venda:.2f}**")
+            st.caption(f"Cliente: **{cliente_selecionado}** | Venda: **R$ {st.session_state.valor_venda:.2f}** | Taxa: **{int(taxa_final * 100)}%**")
             
             data_venda = st.date_input("Data da Venda:", value=date.today(), key='data_venda')
             
@@ -558,20 +737,20 @@ def render_lancamento():
             if submitted_venda:
                 # Usa os valores recalculados no momento da submissão
                 lancamento_valor_venda = st.session_state.valor_venda
-                lancamento_cashback = lancamento_valor_venda * CASHBACK_PERCENTUAL
+                lancamento_cashback = lancamento_valor_venda * taxa_final
                 
                 if cliente_selecionado == '':
-                    st.error("Por favor, selecione ou digite o nome de uma cliente.")
+                    st.error("Por favor, selecione o nome de uma cliente.")
                 elif lancamento_valor_venda <= 0.00:
                     st.error("O valor da venda deve ser maior que R$ 0,00.")
                 elif cliente_selecionado not in st.session_state.clientes['Nome'].values:
-                    st.warning("Cliente não encontrado. Por favor, cadastre-o primeiro na seção 'Cadastro'.")
+                    st.error("Cliente não encontrado. Por favor, cadastre-o primeiro na seção 'Cadastro'.")
                 else:
                     lancar_venda(cliente_selecionado, lancamento_valor_venda, lancamento_cashback, data_venda)
 
     elif operacao == "Resgatar Cashback":
         st.subheader("Resgate de Cashback")
-        
+        # (Lógica de Resgate MANTIDA)
         clientes_com_cashback = st.session_state.clientes[st.session_state.clientes['Cashback Disponível'] >= 20.00].copy()
         clientes_options = [''] + clientes_com_cashback['Nome'].tolist()
         
@@ -631,40 +810,6 @@ def render_lancamento():
                     else:
                         st.error("Erro ao calcular saldo. Cliente não encontrado.")
 
-    # --- BLOCO: Exibe Histórico do Cliente Selecionado (em Venda ou Resgate) ---
-    
-    # Decide qual nome de cliente usar para a consulta de histórico
-    cliente_para_historico = ''
-    if operacao == "Lançar Nova Venda" and 'nome_cliente_venda' in st.session_state and st.session_state.nome_cliente_venda:
-        cliente_para_historico = st.session_state.nome_cliente_venda
-    elif operacao == "Resgatar Cashback" and 'nome_cliente_resgate' in st.session_state and st.session_state.nome_cliente_resgate:
-        cliente_para_historico = st.session_state.nome_cliente_resgate
-        
-    if cliente_para_historico:
-        st.markdown("---")
-        st.subheader(f"Histórico de Transações de: *{cliente_para_historico}*")
-        
-        # Filtra o DataFrame de lançamentos pelo cliente
-        df_historico_cliente = st.session_state.lancamentos[
-            st.session_state.lancamentos['Cliente'] == cliente_para_historico
-        ].copy()
-        
-        if not df_historico_cliente.empty:
-            # Formata os valores para exibição
-            df_historico_cliente['Valor Venda/Resgate'] = pd.to_numeric(df_historico_cliente['Valor Venda/Resgate'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
-            df_historico_cliente['Valor Cashback'] = pd.to_numeric(df_historico_cliente['Valor Cashback'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
-            
-            # Reorganiza as colunas para melhor visualização
-            colunas_display = ['Data', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
-            
-            st.dataframe(
-                df_historico_cliente[colunas_display].sort_values(by='Data', ascending=False),
-                hide_index=True,
-                use_container_width=True
-            )
-        else:
-            st.info(f"Nenhum lançamento encontrado para {cliente_para_historico}.")
-
 
 def render_cadastro():
     """Renderiza a página de Cadastro e Gestão de Clientes - Antiga Tab 2"""
@@ -676,22 +821,41 @@ def render_cadastro():
     # ------------------
     st.subheader("Novo Cliente")
     with st.form("form_cadastro_cliente", clear_on_submit=True):
-        nome = st.text_input("Nome da Cliente (Obrigatório):", key='cadastro_nome')
+        col_nome, col_tel = st.columns(2)
+        with col_nome:
+            nome = st.text_input("Nome da Cliente (Obrigatório):", key='cadastro_nome')
+        with col_tel:
+            telefone = st.text_input("Número de Telefone:", help="Ex: 99999-9999", key='cadastro_telefone')
+            
         apelido = st.text_input("Apelido ou Descrição (Opcional):", key='cadastro_apelido')
-        telefone = st.text_input("Número de Telefone:", help="Ex: 99999-9999", key='cadastro_telefone')
         
+        st.markdown("---")
+        st.markdown("##### 🎁 Programa Indique e Ganhe")
+        
+        # Campo de Indicação
+        is_indicado = st.checkbox("Esta cliente foi indicada por outra?", key='is_indicado')
+        indicado_por = ''
+        if is_indicado:
+            clientes_indicadores = [''] + st.session_state.clientes['Nome'].tolist()
+            indicado_por = st.selectbox(
+                "Nome da Cliente Indicadora:", 
+                options=clientes_indicadores, 
+                key='indicado_por',
+                index=0
+            )
+
         submitted_cadastro = st.form_submit_button("Cadastrar Cliente")
         
         if submitted_cadastro:
             if nome:
-                cadastrar_cliente(nome.strip(), apelido.strip(), telefone.strip())
+                cadastrar_cliente(nome.strip(), apelido.strip(), telefone.strip(), indicado_por.strip())
             else:
                 st.error("O campo 'Nome da Cliente' é obrigatório.")
 
     st.markdown("---")
     
     # --------------------------------
-    # --- EDIÇÃO E EXCLUSÃO (NOVO) ---
+    # --- EDIÇÃO E EXCLUSÃO (MANTIDO) ---
     # --------------------------------
     st.subheader("Operações de Edição e Exclusão")
     
@@ -770,14 +934,12 @@ def render_cadastro():
                     excluir_cliente(cliente_selecionado_operacao)
             with col_cancela_del:
                 if st.button("↩️ Cancelar Exclusão", use_container_width=True, key='cancelar_exclusao'):
-                    # CORREÇÃO: Remover a chave para limpeza completa de estado
-                    if 'deleting_client' in st.session_state:
-                         del st.session_state.deleting_client
+                    st.session_state.deleting_client = False
                     st.rerun()  
         
     st.markdown("---")
-    st.subheader("Clientes Cadastrados (Visualização)")
-    st.dataframe(st.session_state.clientes, hide_index=True, use_container_width=True)
+    st.subheader("Clientes Cadastrados (Visualização Completa)")
+    st.dataframe(st.session_state.clientes.drop(columns=['Primeira Compra Feita']), hide_index=True, use_container_width=True) # Oculta o Booleano
 
 
 def render_relatorios():
@@ -785,39 +947,78 @@ def render_relatorios():
     
     st.header("Relatórios e Rankings")
     st.markdown("---")
+    
+    # --------------------------------
+    # --- NOVO: RANKING POR NÍVEIS ---
+    # --------------------------------
+    st.subheader("💎 Ranking de Níveis de Fidelidade")
+    
+    # Cria uma cópia e calcula o Nível na hora
+    df_niveis = st.session_state.clientes.copy()
+    
+    # Garante que o nível e o gasto estão atualizados
+    df_niveis['Nivel Atual'] = df_niveis['Gasto Acumulado'].apply(lambda x: calcular_nivel_e_beneficios(x)[0])
+    
+    # Calcula quanto falta para o próximo nível
+    df_niveis['Falta para Próximo Nível'] = df_niveis.apply(
+        lambda row: calcular_falta_para_proximo_nivel(row['Gasto Acumulado'], row['Nivel Atual']), 
+        axis=1
+    )
+    
+    # Ordena por Nível (Diamante > Ouro > Prata) e depois por Gasto Acumulado
+    ordenacao_nivel = {'Diamante': 3, 'Ouro': 2, 'Prata': 1}
+    df_niveis['Ordem'] = df_niveis['Nivel Atual'].map(ordenacao_nivel)
+    df_niveis = df_niveis.sort_values(by=['Ordem', 'Gasto Acumulado'], ascending=[False, False])
+    
+    df_display = df_niveis[['Nome', 'Nivel Atual', 'Gasto Acumulado', 'Falta para Próximo Nível']].reset_index(drop=True)
+    df_display.columns = ['Cliente', 'Nível', 'Gasto Acumulado (R$)', 'Falta para Próximo Nível (R$)']
+    
+    # Formatação para R$
+    df_display['Gasto Acumulado (R$)'] = df_display['Gasto Acumulado (R$)'].map('R$ {:.2f}'.format)
+    df_display['Falta para Próximo Nível (R$)'] = df_display['Falta para Próximo Nível (R$)'].map('R$ {:.2f}'.format)
+    
+    df_display.index += 1
+    st.dataframe(df_display, hide_index=False, use_container_width=True)
+    
+    # Explicação dos Níveis
+    st.markdown("""
+        **Níveis:**
+        - **Prata:** Até R$ 200,00 gastos (3% cashback)
+        - **Ouro:** R$ 200,01 a R$ 1.000,00 gastos (7% cashback normal / 10% turbo)
+        - **Diamante:** Acima de R$ 1.000,01 gastos (15% cashback normal / 20% turbo)
+    """)
+    st.markdown("---")
 
-    # --- Ranking de Cashback ---
-    st.subheader("🏆 Ranking: Maior Saldo de Cashback")
+
+    # --- Ranking de Cashback (MANTIDO) ---
+    st.subheader("💰 Ranking: Maior Saldo de Cashback Disponível")
     ranking_cashback = st.session_state.clientes.sort_values(by='Cashback Disponível', ascending=False).reset_index(drop=True)
     ranking_cashback.index += 1  
-    st.dataframe(ranking_cashback[['Nome', 'Cashback Disponível']], use_container_width=True)
+    st.dataframe(ranking_cashback[['Nome', 'Cashback Disponível']].head(10), use_container_width=True)
     st.markdown("---")
 
 
-    # --- Ranking de Maior Volume de Compras ---
-    st.subheader("💰 Ranking: Maior Volume de Compras (Vendas)")
+    # --- Ranking de Maior Volume de Compras (USANDO GASTO ACUMULADO) ---
+    st.subheader("🛒 Ranking: Maior Volume de Compras (Gasto Acumulado Total)")
     
-    vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda'].copy()
-    if not vendas_df.empty:
-        vendas_df['Valor Venda/Resgate'] = pd.to_numeric(vendas_df['Valor Venda/Resgate'], errors='coerce').fillna(0)
-        ranking_compras = vendas_df.groupby('Cliente')['Valor Venda/Resgate'].sum().reset_index()
-        ranking_compras.columns = ['Cliente', 'Total Compras (R$)']
-        ranking_compras = ranking_compras.sort_values(by='Total Compras (R$)', ascending=False).reset_index(drop=True)
-        ranking_compras['Total Compras (R$)'] = ranking_compras['Total Compras (R$)'].map('R$ {:.2f}'.format)
-        ranking_compras.index += 1
-        st.dataframe(ranking_compras, hide_index=False, use_container_width=True)
-    else:
-        st.info("Nenhuma venda registrada ainda para calcular o ranking de compras.")
+    # Usando a coluna 'Gasto Acumulado' diretamente que está sempre atualizada
+    ranking_compras = st.session_state.clientes[['Nome', 'Gasto Acumulado']].sort_values(by='Gasto Acumulado', ascending=False).reset_index(drop=True)
+    ranking_compras.columns = ['Cliente', 'Total Compras (R$)']
+    ranking_compras['Total Compras (R$)'] = ranking_compras['Total Compras (R$)'].map('R$ {:.2f}'.format)
+    ranking_compras.index += 1
+    st.dataframe(ranking_compras.head(10), hide_index=False, use_container_width=True)
+
     st.markdown("---")
     
-    # --- Histórico de Lançamentos ---
+    # --- Histórico de Lançamentos (MANTIDO) ---
     st.subheader("📄 Histórico de Lançamentos")
     
     col_data, col_tipo = st.columns(2)
     with col_data:
         data_selecionada = st.date_input("Filtrar por Data:", value=None)
     with col_tipo:
-        tipo_selecionado = st.selectbox("Filtrar por Tipo:", ['Todos', 'Venda', 'Resgate'], index=0)
+        # Adicionado o Bônus de Indicação
+        tipo_selecionado = st.selectbox("Filtrar por Tipo:", ['Todos', 'Venda', 'Resgate', 'Bônus Indicação'], index=0)
 
     df_historico = st.session_state.lancamentos.copy()
     
@@ -906,7 +1107,7 @@ if "pagina_atual" not in st.session_state:
     st.session_state.pagina_atual = "Home"
 
 
-# --- Renderiza o Header Customizado ---
+# --- Renderiza o Header Customizado (MANTIDO) ---
 
 def render_header():
     """Renderiza o header customizado com a navegação em botões."""
@@ -960,39 +1161,30 @@ def render_header():
 
 # --- EXECUÇÃO PRINCIPAL ---
 
-# 1. Inicialização de DataFrames vazios para evitar 'AttributeError'
+# 1. Inicialização de DataFrames vazios para evitar 'AttributeError' (Atualizado com novas colunas)
+CLIENTES_COLS_FULL = ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível', 'Gasto Acumulado', 'Nivel Atual', 'Indicado Por', 'Primeira Compra Feita']
+
 if 'clientes' not in st.session_state:
-    st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
+    st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS_FULL)
 if 'lancamentos' not in st.session_state:
     st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
     
-# 2. Garante que as variáveis de estado de edição e deleção existam
+# 2. Garante que as variáveis de estado de edição e deleção existam (MANTIDO)
 if 'editing_client' not in st.session_state:
     st.session_state.editing_client = False
 if 'deleting_client' not in st.session_state:
     st.session_state.deleting_client = False
-# Garante que o valor da venda para cálculo instantâneo esteja pronto
+# Garante que o valor da venda para cálculo instantâneo esteja pronto (MANTIDO)
 if 'valor_venda' not in st.session_state:
     st.session_state.valor_venda = 0.00
     
-# 🟢 Inicialização da chave de controle de versão
+# 🟢 NOVO: Inicialização da chave de controle de versão (MANTIDO)
 if 'data_version' not in st.session_state:
     st.session_state.data_version = 0
 
-# 3. CORREÇÃO CRÍTICA: Carregamos os DFs do cache/GitHub e os armazenamos no st.session_state
-# A chamada a carregar_dados agora retorna os DataFrames.
-df_cache = carregar_dados(st.session_state.data_version)
 
-# 🟢 Armazena os DataFrames retornados pelo cache na sessão
-st.session_state.clientes = df_cache['clientes']
-st.session_state.lancamentos = df_cache['lancamentos']
-
-# Se o DataFrame de clientes estiver vazio no PRIMEIRO carregamento, adiciona o exemplo
-# e salva, garantindo que o CSV inicial seja criado no GitHub.
-if st.session_state.clientes.empty and len(st.session_state.clientes.index) < 1:
-    st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-    salvar_dados()  # Salva para criar os arquivos iniciais no GitHub/Local
-    st.rerun() # Reruns para carregar a nova versão dos arquivos iniciais
+# 3. Carregamento: Chamamos a função carregar_dados. O cache é limpo em salvar_dados()
+carregar_dados(st.session_state.data_version)
 
 # Renderiza o cabeçalho customizado no topo da página
 render_header()
