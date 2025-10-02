@@ -250,23 +250,24 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
     if idx_cliente.empty: st.error(f"Erro: Cliente '{cliente_nome}' não encontrado."); return
     
-    cliente_data = st.session_state.clientes.loc[idx_cliente].iloc[0]
-    nivel_antigo = cliente_data['Nivel Atual']
+    # --- LÓGICA CORRIGIDA ---
+    # 1. Captura o estado ANTES de qualquer modificação
+    cliente_data_antes = st.session_state.clientes.loc[idx_cliente].iloc[0].copy()
+    nivel_antigo = cliente_data_antes['Nivel Atual']
+    era_primeira_compra = not cliente_data_antes['Primeira Compra Feita']
 
+    # 2. Aplica as atualizações de valores
     st.session_state.clientes.loc[idx_cliente, 'Cashback Disponível'] += valor_cashback
     st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'] += valor_venda
     
-    cliente_atualizada = st.session_state.clientes.loc[idx_cliente].iloc[0]
-    novo_gasto_acumulado = cliente_atualizada['Gasto Acumulado']
-    saldo_atualizado = cliente_atualizada['Cashback Disponível']
-
+    # 3. Recalcula o nível baseado nos novos valores
+    novo_gasto_acumulado = st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'].iloc[0]
     novo_nivel, _, _ = calcular_nivel_e_beneficios(novo_gasto_acumulado)
     st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
-    st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = True
-
-    # SE FOR A PRIMEIRA COMPRA DE CLIENTE INDICADO, PROCESSA O BÔNUS
-    if not cliente_data['Primeira Compra Feita'] and cliente_data['Indicado Por']:
-        indicador_nome = cliente_data['Indicado Por']
+    
+    # 4. Verifica se a condição para bônus é atendida USANDO O ESTADO CAPTURADO ANTERIORMENTE
+    if era_primeira_compra and cliente_data_antes['Indicado Por']:
+        indicador_nome = cliente_data_antes['Indicado Por']
         idx_indicador = st.session_state.clientes[st.session_state.clientes['Nome'] == indicador_nome].index
         if not idx_indicador.empty:
             bonus = valor_venda * BONUS_INDICACAO_PERCENTUAL
@@ -291,12 +292,13 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
                 )
                 enviar_mensagem_telegram(mensagem_indicador)
 
-
+    # 5. Cria o registro da venda
     novo_lancamento = pd.DataFrame([{'Data': data_venda, 'Cliente': cliente_nome, 'Tipo': 'Venda', 'Valor Venda/Resgate': valor_venda, 'Valor Cashback': valor_cashback, 'Venda Turbo': 'Sim' if venda_turbo_selecionada else 'Não'}])
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
 
-    # LÓGICA DE MENSAGEM PARA O CLIENTE QUE COMPROU
+    # 6. LÓGICA DE MENSAGEM PARA O CLIENTE QUE COMPROU
     if TELEGRAM_ENABLED:
+        saldo_atualizado = st.session_state.clientes.loc[idx_cliente, 'Cashback Disponível'].iloc[0]
         fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
         agora_brasil = datetime.now(fuso_horario_brasil)
         data_hora_lancamento = agora_brasil.strftime('%d/%m/%Y às %H:%M')
@@ -311,17 +313,14 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             "➡️ Quanto mais você compra, mais descontos exclusivos você ganha!\n"
             "---------------------------------\n\n"
         )
-
         mensagem_body = (
             f"Olá *{cliente_nome}*, aqui é o programa de fidelidade da loja Doce&Bella!\n\n"
             f"Você ganhou *{cashback_ganho_str}* em créditos CASHBACK.\n"
             f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n\n"
             f"⭐ Seu nível atual é: *{novo_nivel}*"
         )
-
         if novo_nivel != nivel_antigo:
             mensagem_body += f"\n\n🎉 Parabéns! Você subiu para o nível *{novo_nivel}*! Aproveite seus novos benefícios."
-
         mensagem_footer = (
             f"\n\n=================================\n\n"
             f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS*\n"
@@ -331,9 +330,10 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             f"💬 *Fale conosco para consultar seu saldo e resgatar!*\n\n"
             f"⚠️ Adicione este número na sua agenda para ficar por dentro das novidades."
         )
-        
         enviar_mensagem_telegram(mensagem_header + mensagem_body + mensagem_footer)
 
+    # 7. Atualiza o status de primeira compra e salva tudo
+    st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = True
     salvar_dados()
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome} ({novo_nivel}).")
     st.rerun()
