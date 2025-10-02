@@ -23,6 +23,7 @@ except ImportError:
 # --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
+PRODUTOS_TURBO_CSV = 'produtos_turbo.csv' # NOVO
 CASHBACK_PERCENTUAL = 0.03 # Taxa base Padrão (agora só para Nível Prata)
 BONUS_INDICACAO_PERCENTUAL = 0.05 # 5% para o indicador
 CASHBACK_INDICADO_PRIMEIRA_COMPRA = 0.08 # 8% para o indicado
@@ -146,10 +147,14 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
     
     df_temp = df.copy()
     
-    if 'Data' in df_temp.columns:
-        df_temp['Data'] = pd.to_datetime(df_temp['Data'], errors='coerce').apply(
-            lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else ''
-        )
+    if 'Data' in df_temp.columns or 'Data Início' in df_temp.columns or 'Data Fim' in df_temp.columns:
+        # Formata datas para o CSV
+        if 'Data' in df_temp.columns:
+             df_temp['Data'] = pd.to_datetime(df_temp['Data'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else '')
+        if 'Data Início' in df_temp.columns:
+             df_temp['Data Início'] = pd.to_datetime(df_temp['Data Início'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else '')
+        if 'Data Fim' in df_temp.columns:
+             df_temp['Data Fim'] = pd.to_datetime(df_temp['Data Fim'], errors='coerce').apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else '')
 
     try:
         g = Github(TOKEN)
@@ -170,7 +175,7 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
         return False
 
-# --- Funções de Carregamento/Salvamento (MANTIDO O MESMO) ---
+# --- Funções de Carregamento/Salvamento ---
 
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
@@ -186,9 +191,11 @@ def salvar_dados():
     if PERSISTENCE_MODE == "GITHUB":
         salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
         salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
+        salvar_dados_no_github(st.session_state.produtos_turbo, PRODUTOS_TURBO_CSV, "AUTOSAVE: Atualizando produtos turbo.") # NOVO
     else: # Modo LOCAL
         st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
+        st.session_state.produtos_turbo.to_csv(PRODUTOS_TURBO_CSV, index=False) # NOVO
         
 def carregar_dados_do_csv(file_path, df_columns):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
@@ -224,7 +231,7 @@ def carregar_dados_do_csv(file_path, df_columns):
 def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    # 🟢 NOVO: Colunas adicionadas para o sistema de níveis e indicação
+    # 🟢 CLIENTES: Colunas adicionadas para o sistema de níveis e indicação
     CLIENTES_COLS = [
         'Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível',
         'Gasto Acumulado', 'Nivel Atual', 'Indicado Por', 'Primeira Compra Feita'
@@ -232,33 +239,44 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     
     st.session_state.clientes = carregar_dados_do_csv(CLIENTES_CSV, CLIENTES_COLS)
     
-    st.session_state.lancamentos = carregar_dados_do_csv(
-        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
-    )
+    # 🟢 LANÇAMENTOS: Adicionado 'Venda Turbo'
+    LANÇAMENTOS_COLS = ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback', 'Venda Turbo']
+    st.session_state.lancamentos = carregar_dados_do_csv(LANÇAMENTOS_CSV, LANÇAMENTOS_COLS)
     
-    # Adiciona a inicialização de DF vazio para evitar erro no primeiro acesso
-    if 'clientes' not in st.session_state:
+    # 🟢 PRODUTOS TURBO: Novo DataFrame
+    PRODUTOS_TURBO_COLS = ['Nome Produto', 'Data Início', 'Data Fim', 'Ativo']
+    st.session_state.produtos_turbo = carregar_dados_do_csv(PRODUTOS_TURBO_CSV, PRODUTOS_TURBO_COLS)
+
+    
+    # --- Inicialização e Tipagem Clientes ---
+    if 'clientes' not in st.session_state or st.session_state.clientes.empty:
         st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS)
-    if 'lancamentos' not in st.session_state:
-        st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
-
-
-    if st.session_state.clientes.empty:
-        # Cria um cliente de exemplo se o DF estiver vazio
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00, 0.00, 'Prata', '', False]
-        salvar_dados()  # Salva para criar os arquivos iniciais no GitHub/Local
+        # Salva para criar os arquivos iniciais no GitHub/Local (Não salva agora para evitar loop, salva no final)
         
-    # Converte tipos de dados
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
     st.session_state.clientes['Gasto Acumulado'] = pd.to_numeric(st.session_state.clientes['Gasto Acumulado'], errors='coerce').fillna(0.0)
     st.session_state.clientes['Primeira Compra Feita'] = st.session_state.clientes['Primeira Compra Feita'].astype(bool)
 
 
+    # --- Tipagem Lançamentos ---
     if not st.session_state.lancamentos.empty:
         st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
+        # Garante que 'Venda Turbo' seja string ou booleano para evitar erro de tipo na exibição
+        st.session_state.lancamentos['Venda Turbo'] = st.session_state.lancamentos['Venda Turbo'].astype(str).replace({'True': 'Sim', 'False': 'Não', '': 'Não'})
+
+    # --- Tipagem Produtos Turbo ---
+    if 'produtos_turbo' not in st.session_state:
+        st.session_state.produtos_turbo = pd.DataFrame(columns=PRODUTOS_TURBO_COLS)
+        
+    if not st.session_state.produtos_turbo.empty:
+        st.session_state.produtos_turbo['Data Início'] = pd.to_datetime(st.session_state.produtos_turbo['Data Início'], errors='coerce').dt.date
+        st.session_state.produtos_turbo['Data Fim'] = pd.to_datetime(st.session_state.produtos_turbo['Data Fim'], errors='coerce').dt.date
+        # Garante que 'Ativo' seja booleano
+        st.session_state.produtos_turbo['Ativo'] = st.session_state.produtos_turbo['Ativo'].astype(str).map({'True': True, 'False': False, 'Sim': True, 'Não': False}).fillna(False).astype(bool)
     
 
-# --- Funções do Programa de Fidelidade ---
+# --- Funções do Programa de Fidelidade (MANTIDO) ---
 
 def calcular_nivel_e_beneficios(gasto_acumulado: float) -> tuple[str, float, float]:
     """Calcula o nível, cashback normal e turbo com base no gasto acumulado."""
@@ -297,10 +315,64 @@ def calcular_falta_para_proximo_nivel(gasto_acumulado: float, nivel_atual: str) 
         return 0.0 # Já atingiu o requisito, mas o nível não foi atualizado (será atualizado na próxima venda)
 
 
-# --- Funções de Manipulação de Clientes e Transações ---
+# --- Funções de Manipulação de Produtos Turbo (NOVO) ---
+
+def adicionar_produto_turbo(nome_produto, data_inicio, data_fim):
+    """Adiciona um novo produto turbo ao DataFrame."""
+    if nome_produto in st.session_state.produtos_turbo['Nome Produto'].values:
+        st.error("Erro: Já existe um produto com este nome.")
+        return False
+    
+    # Define se está ativo na hora do cadastro
+    is_ativo = (data_inicio <= date.today()) and (data_fim >= date.today())
+        
+    novo_produto = pd.DataFrame({
+        'Nome Produto': [nome_produto],
+        'Data Início': [data_inicio],
+        'Data Fim': [data_fim],
+        'Ativo': [is_ativo]
+    })
+    st.session_state.produtos_turbo = pd.concat([st.session_state.produtos_turbo, novo_produto], ignore_index=True)
+    salvar_dados()  
+    st.success(f"Produto '{nome_produto}' cadastrado com sucesso! Ativo: {'Sim' if is_ativo else 'Não'}")
+    st.rerun()
+
+def alternar_status_produto_turbo(nome_produto, novo_status: bool):
+    """Alterna manualmente o status de um produto turbo."""
+    idx = st.session_state.produtos_turbo[st.session_state.produtos_turbo['Nome Produto'] == nome_produto].index
+    if not idx.empty:
+        st.session_state.produtos_turbo.loc[idx, 'Ativo'] = novo_status
+        salvar_dados()
+        st.toast(f"Status do produto '{nome_produto}' alterado para {'Ativo' if novo_status else 'Inativo'}.")
+        st.rerun()
+    else:
+        st.error("Produto não encontrado.")
+
+def excluir_produto_turbo(nome_produto):
+    """Exclui um produto turbo."""
+    st.session_state.produtos_turbo = st.session_state.produtos_turbo[
+        st.session_state.produtos_turbo['Nome Produto'] != nome_produto
+    ].reset_index(drop=True)
+    salvar_dados()
+    st.success(f"Produto '{nome_produto}' excluído.")
+    st.rerun()
+
+def get_produtos_turbo_ativos():
+    """Retorna uma lista dos nomes dos produtos turbo ativos na data de hoje."""
+    hoje = date.today()
+    
+    df_ativos = st.session_state.produtos_turbo[
+        (st.session_state.produtos_turbo['Ativo'] == True) & 
+        (st.session_state.produtos_turbo['Data Início'] <= hoje) & 
+        (st.session_state.produtos_turbo['Data Fim'] >= hoje)
+    ]
+    return df_ativos['Nome Produto'].tolist()
+
+
+# --- Funções de Manipulação de Clientes e Transações (MANTIDO E ADAPTADO) ---
 
 def editar_cliente(nome_original, nome_novo, apelido, telefone):
-    """Localiza o cliente pelo nome original, atualiza os dados e salva."""
+    # Lógica de edição de cliente (MANTIDA)
     
     idx = st.session_state.clientes[st.session_state.clientes['Nome'] == nome_original].index
     
@@ -324,9 +396,8 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
     st.success(f"Cadastro de '{nome_novo}' atualizado com sucesso!")
     st.rerun()  
 
-
 def excluir_cliente(nome_cliente):
-    """Exclui o cliente e todas as suas transações, depois salva."""
+    # Lógica de exclusão de cliente (MANTIDA)
     
     st.session_state.clientes = st.session_state.clientes[
         st.session_state.clientes['Nome'] != nome_cliente
@@ -343,7 +414,8 @@ def excluir_cliente(nome_cliente):
 
 
 def cadastrar_cliente(nome, apelido, telefone, indicado_por=''):
-    """Adiciona um novo cliente ao DataFrame de clientes e salva o CSV."""
+    # Lógica de cadastro de cliente (MANTIDA)
+    
     if nome in st.session_state.clientes['Nome'].values:
         st.error("Erro: Já existe um cliente com este nome.")
         return False
@@ -368,7 +440,8 @@ def cadastrar_cliente(nome, apelido, telefone, indicado_por=''):
     st.success(f"Cliente '{nome}' cadastrado com sucesso! Nível inicial: Prata.")
     st.rerun()
 
-def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
+# ADAPTADA: Adicionado parâmetro 'venda_turbo_selecionada' para salvar no histórico
+def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_turbo_selecionada: bool):
     """Lança uma venda, atualiza o cashback do cliente e do indicador, salva e envia notificação."""
     
     idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
@@ -417,7 +490,8 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
                 'Cliente': [indicador_nome],
                 'Tipo': ['Bônus Indicação'],
                 'Valor Venda/Resgate': [valor_venda],
-                'Valor Cashback': [bonus_para_indicador]
+                'Valor Cashback': [bonus_para_indicador],
+                'Venda Turbo': ['Não']
             })
             st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, lancamento_bonus], ignore_index=True)
             st.success(f"🎁 Bônus de Indicação de R$ {bonus_para_indicador:.2f} creditado para **{indicador_nome}**!")
@@ -431,14 +505,15 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         'Cliente': [cliente_nome],
         'Tipo': ['Venda'],
         'Valor Venda/Resgate': [valor_venda],
-        'Valor Cashback': [valor_cashback]
+        'Valor Cashback': [valor_cashback],
+        'Venda Turbo': ['Sim' if venda_turbo_selecionada else 'Não'] # NOVO CAMPO
     })
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     
     salvar_dados()  
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para **{cliente_nome}** ({novo_nivel}). Cashback de R$ {valor_cashback:.2f} adicionado.")
 
-    # 4. Lógica de Envio para o Telegram (MANTIDO O MESMO)
+    # 4. Lógica de Envio para o Telegram (MANTIDO)
     if TELEGRAM_ENABLED:
         
         # Filtra SÓ as vendas (incluindo a atual)
@@ -494,10 +569,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         enviar_mensagem_telegram(mensagem_telegram)
 
 def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resgate, saldo_disponivel):
-    """
-    Processa o resgate de cashback, salva os dados e envia notificação ao Telegram.
-    Atenção: A variável 'saldo_disponivel' é o saldo antes do resgate.
-    """
+    # Lógica de resgate (MANTIDA)
     
     # --- 1. Validações Iniciais ---
     max_resgate = valor_venda_atual * 0.50
@@ -524,14 +596,15 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
         'Cliente': [cliente_nome],
         'Tipo': ['Resgate'],
         'Valor Venda/Resgate': [valor_venda_atual],
-        'Valor Cashback': [-valor_resgate]  
+        'Valor Cashback': [-valor_resgate],
+        'Venda Turbo': ['Não'] # Resgate não é turbo
     })
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     
     salvar_dados()  
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
 
-    # --- 3. Lógica de Envio para o Telegram (MANTIDO O MESMO) ---
+    # --- 3. Lógica de Envio para o Telegram (MANTIDA) ---
     if TELEGRAM_ENABLED:
         
         # --- Fuso Horário Brasil ---
@@ -638,7 +711,7 @@ st.markdown("""
         color: #E91E63 !important;  
     }
 
-    /* Estilo para destaque de Nível */
+    /* Estilo para destaque de Nível (MANTIDO) */
     .nivel-diamante {
         color: #3f51b5; /* Azul */
         font-weight: bold;
@@ -697,11 +770,12 @@ def render_lancamento():
             
             # Sobrescreve para Indicação
             if not primeira_compra_feita and cliente_data['Indicado Por']:
-                taxa_aplicada = CASHBACK_INDICADO_PRIMEIRA_COMPRA
-                st.info(f"✨ **INDICAÇÃO ATIVA!** Cliente na primeira compra com indicação. Cashback de **{int(taxa_aplicada * 100)}%** aplicado.")
-                cb_normal_rate = taxa_aplicada
-                cb_turbo_rate = taxa_aplicada # Usa a mesma taxa
-                
+                taxa_aplicada_ind = CASHBACK_INDICADO_PRIMEIRA_COMPRA
+                st.info(f"✨ **INDICAÇÃO ATIVA!** Cliente na primeira compra com indicação. Cashback de **{int(taxa_aplicada_ind * 100)}%** aplicado.")
+                cb_normal_rate = taxa_aplicada_ind
+                cb_turbo_rate = taxa_aplicada_ind # Usa a mesma taxa para cashback de primeira compra
+
+            
             col_info1, col_info2, col_info3 = st.columns(3)
             col_info1.metric("Nível Atual", nivel_cliente)
             col_info2.metric("Cashback Normal", f"{int(cb_normal_rate * 100)}%")
@@ -716,8 +790,24 @@ def render_lancamento():
         # 3. MOVIDO PARA FORA DO FORM: Valor da Venda (para cálculo em tempo real)
         valor_venda = st.number_input("Valor da Venda (R$):", min_value=0.00, step=50.0, format="%.2f", key='valor_venda')
         
-        # Campo para Turbo
-        venda_turbo = st.checkbox("Esta venda contém **Produtos Turbo**?", key='venda_turbo')
+        # 🟢 VERIFICAÇÃO DE PRODUTOS TURBO ATIVOS
+        produtos_ativos = get_produtos_turbo_ativos()
+        
+        venda_turbo = False
+        if produtos_ativos:
+            st.warning(f"⚠️ **PRODUTOS TURBO ATIVOS:** {', '.join(produtos_ativos)}", icon="⚡")
+            
+            if nivel_cliente != 'Prata':
+                # Só pergunta se a cliente tem direito a cashback turbo (Nível Ouro/Diamante ou Indicação)
+                venda_turbo = st.checkbox(
+                    "Esta venda contém **Produtos Turbo** (Aplica taxa de **" + f"{int(cb_turbo_rate * 100)}%" + "**)?", 
+                    key='venda_turbo_check'
+                )
+            else:
+                st.info("Clientes Nível Prata não recebem benefício Turbo.")
+        else:
+             st.info("Nenhum produto turbo ativo no momento.")
+
 
         # CÁLCULO INSTANTÂNEO
         taxa_final = cb_turbo_rate if venda_turbo and cb_turbo_rate > 0 else cb_normal_rate
@@ -746,7 +836,7 @@ def render_lancamento():
                 elif cliente_selecionado not in st.session_state.clientes['Nome'].values:
                     st.error("Cliente não encontrado. Por favor, cadastre-o primeiro na seção 'Cadastro'.")
                 else:
-                    lancar_venda(cliente_selecionado, lancamento_valor_venda, lancamento_cashback, data_venda)
+                    lancar_venda(cliente_selecionado, lancamento_valor_venda, lancamento_cashback, data_venda, venda_turbo)
 
     elif operacao == "Resgatar Cashback":
         st.subheader("Resgate de Cashback")
@@ -810,9 +900,76 @@ def render_lancamento():
                     else:
                         st.error("Erro ao calcular saldo. Cliente não encontrado.")
 
+def render_produtos_turbo():
+    """Renderiza a página de Cadastro e Gestão de Produtos Turbo (NOVA ABA)"""
+    st.header("Gestão de Produtos Turbo (Cashback Extra)")
+    st.markdown("---")
+
+    # ------------------
+    # --- NOVO CADASTRO ---
+    # ------------------
+    st.subheader("Cadastrar Novo Produto Turbo")
+    with st.form("form_cadastro_produto", clear_on_submit=True):
+        nome_produto = st.text_input("Nome do Produto (Ex: Linha Cabelo X)", key='cadastro_produto_nome')
+        col_data_inicio, col_data_fim = st.columns(2)
+        with col_data_inicio:
+            data_inicio = st.date_input("Data de Início da Promoção:", value=date.today(), key='cadastro_data_inicio')
+        with col_data_fim:
+            data_fim = st.date_input("Data de Fim da Promoção:", value=date.today(), key='cadastro_data_fim')
+        
+        submitted_cadastro = st.form_submit_button("Cadastrar Produto")
+        
+        if submitted_cadastro:
+            if nome_produto and data_inicio and data_fim:
+                if data_inicio > data_fim:
+                     st.error("A Data de Início não pode ser maior que a Data de Fim.")
+                else:
+                    adicionar_produto_turbo(nome_produto.strip(), data_inicio, data_fim)
+            else:
+                st.error("Preencha todos os campos obrigatórios.")
+
+    st.markdown("---")
+    
+    # --------------------------------
+    # --- VISUALIZAÇÃO E GESTÃO ---
+    # --------------------------------
+    st.subheader("Produtos Cadastrados")
+    
+    if st.session_state.produtos_turbo.empty:
+        st.info("Nenhum produto turbo cadastrado ainda.")
+        return
+
+    # Processa o DF para exibição
+    df_display = st.session_state.produtos_turbo.copy()
+    df_display['Status'] = df_display.apply(
+        lambda row: 'ATIVO' if row['Ativo'] and row['Data Início'] <= date.today() and row['Data Fim'] >= date.today() else 'INATIVO',
+        axis=1
+    )
+    df_display['Ativo?'] = df_display['Ativo'].map({True: 'Sim', False: 'Não'})
+    
+    st.dataframe(df_display[['Nome Produto', 'Data Início', 'Data Fim', 'Status']], use_container_width=True, hide_index=True)
+    
+    # --- Opções de Exclusão ---
+    st.markdown("---")
+    st.subheader("Excluir Produto")
+    
+    produtos_para_operacao = [''] + st.session_state.produtos_turbo['Nome Produto'].tolist()
+    produto_selecionado = st.selectbox(
+        "Selecione o Produto para Excluir:",
+        options=produtos_para_operacao,
+        index=0,
+        key='produto_selecionado_exclusao'
+    )
+
+    if produto_selecionado:
+        st.error(f"Deseja realmente excluir **{produto_selecionado}**?")
+        if st.button(f"🔴 Confirmar Exclusão de {produto_selecionado}", type='primary', key='confirmar_exclusao_produto'):
+            excluir_produto_turbo(produto_selecionado)
+
 
 def render_cadastro():
     """Renderiza a página de Cadastro e Gestão de Clientes - Antiga Tab 2"""
+    # (MANTIDO o código de Cadastro e Edição de Cliente)
     
     st.header("Cadastro de Clientes e Gestão")
     
@@ -941,7 +1098,6 @@ def render_cadastro():
     st.subheader("Clientes Cadastrados (Visualização Completa)")
     st.dataframe(st.session_state.clientes.drop(columns=['Primeira Compra Feita']), hide_index=True, use_container_width=True) # Oculta o Booleano
 
-
 def render_relatorios():
     """Renderiza a página de Relatórios e Rankings - Antiga Tab 3"""
     
@@ -949,7 +1105,7 @@ def render_relatorios():
     st.markdown("---")
     
     # --------------------------------
-    # --- NOVO: RANKING POR NÍVEIS ---
+    # --- RANKING POR NÍVEIS (MANTIDO) ---
     # --------------------------------
     st.subheader("💎 Ranking de Níveis de Fidelidade")
     
@@ -998,7 +1154,7 @@ def render_relatorios():
     st.markdown("---")
 
 
-    # --- Ranking de Maior Volume de Compras (USANDO GASTO ACUMULADO) ---
+    # --- Ranking de Maior Volume de Compras (MANTIDO) ---
     st.subheader("🛒 Ranking: Maior Volume de Compras (Gasto Acumulado Total)")
     
     # Usando a coluna 'Gasto Acumulado' diretamente que está sempre atualizada
@@ -1010,7 +1166,7 @@ def render_relatorios():
 
     st.markdown("---")
     
-    # --- Histórico de Lançamentos (MANTIDO) ---
+    # --- Histórico de Lançamentos (ADICIONADO Venda Turbo) ---
     st.subheader("📄 Histórico de Lançamentos")
     
     col_data, col_tipo = st.columns(2)
@@ -1034,6 +1190,11 @@ def render_relatorios():
         if not df_historico.empty:
             df_historico['Valor Venda/Resgate'] = pd.to_numeric(df_historico['Valor Venda/Resgate'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
             df_historico['Valor Cashback'] = pd.to_numeric(df_historico['Valor Cashback'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
+            
+            # Reorganiza as colunas para incluir 'Venda Turbo'
+            cols_ordem = ['Data', 'Cliente', 'Tipo', 'Venda Turbo', 'Valor Venda/Resgate', 'Valor Cashback']
+            df_historico = df_historico.reindex(columns=cols_ordem)
+            
             st.dataframe(df_historico, hide_index=True, use_container_width=True)
         else:
             st.info("Nenhum lançamento encontrado com os filtros selecionados.")
@@ -1080,7 +1241,7 @@ def render_home():
     st.markdown("---")
     st.markdown("### Próximos Passos Rápidos")
     
-    col_nav1, col_nav2, col_nav3 = st.columns(3)
+    col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
     
     if col_nav1.button("▶️ Lançar Nova Venda", use_container_width=True):
         st.session_state.pagina_atual = "Lançamento"
@@ -1089,8 +1250,12 @@ def render_home():
     if col_nav2.button("👥 Cadastrar Nova Cliente", use_container_width=True):
         st.session_state.pagina_atual = "Cadastro"
         st.rerun()
+        
+    if col_nav3.button("⚡ Produtos Turbo", use_container_width=True):
+        st.session_state.pagina_atual = "Produtos Turbo"
+        st.rerun()
 
-    if col_nav3.button("📈 Ver Relatórios de Vendas", use_container_width=True):
+    if col_nav4.button("📈 Ver Relatórios de Vendas", use_container_width=True):
         st.session_state.pagina_atual = "Relatórios"
         st.rerun()
 
@@ -1100,6 +1265,7 @@ PAGINAS = {
     "Home": render_home,
     "Lançamento": render_lancamento,
     "Cadastro": render_cadastro,
+    "Produtos Turbo": render_produtos_turbo, # NOVO
     "Relatórios": render_relatorios
 }
 
@@ -1107,13 +1273,13 @@ if "pagina_atual" not in st.session_state:
     st.session_state.pagina_atual = "Home"
 
 
-# --- Renderiza o Header Customizado (MANTIDO) ---
+# --- Renderiza o Header Customizado (ADICIONADA ABA PRODUTOS TURBO) ---
 
 def render_header():
     """Renderiza o header customizado com a navegação em botões."""
     
     # Colunas para o Logo e a Navegação (Aumentamos a coluna do logo)
-    col_logo, col_nav = st.columns([1.5, 4])
+    col_logo, col_nav = st.columns([1.5, 5])
     
     with col_logo:
         st.markdown(f'''
@@ -1129,7 +1295,7 @@ def render_header():
         # Container de botões (Horizontal)
         cols_botoes = st.columns([1] * len(PAGINAS))
         
-        paginas_ordenadas = ["Home", "Lançamento", "Cadastro", "Relatórios"]
+        paginas_ordenadas = ["Home", "Lançamento", "Cadastro", "Produtos Turbo", "Relatórios"]
         
         for i, nome in enumerate(paginas_ordenadas):
             if nome in PAGINAS:
@@ -1161,13 +1327,17 @@ def render_header():
 
 # --- EXECUÇÃO PRINCIPAL ---
 
-# 1. Inicialização de DataFrames vazios para evitar 'AttributeError' (Atualizado com novas colunas)
+# 1. Inicialização de DataFrames vazios para evitar 'AttributeError'
 CLIENTES_COLS_FULL = ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível', 'Gasto Acumulado', 'Nivel Atual', 'Indicado Por', 'Primeira Compra Feita']
+LANÇAMENTOS_COLS_FULL = ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback', 'Venda Turbo'] # NOVO
+PRODUTOS_TURBO_COLS_FULL = ['Nome Produto', 'Data Início', 'Data Fim', 'Ativo'] # NOVO
 
 if 'clientes' not in st.session_state:
     st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS_FULL)
 if 'lancamentos' not in st.session_state:
-    st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
+    st.session_state.lancamentos = pd.DataFrame(columns=LANÇAMENTOS_COLS_FULL)
+if 'produtos_turbo' not in st.session_state:
+    st.session_state.produtos_turbo = pd.DataFrame(columns=PRODUTOS_TURBO_COLS_FULL)
     
 # 2. Garante que as variáveis de estado de edição e deleção existam (MANTIDO)
 if 'editing_client' not in st.session_state:
