@@ -253,11 +253,9 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     cliente_data = st.session_state.clientes.loc[idx_cliente].iloc[0]
     nivel_antigo = cliente_data['Nivel Atual']
 
-    # Atualiza dados da cliente
     st.session_state.clientes.loc[idx_cliente, 'Cashback Disponível'] += valor_cashback
     st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'] += valor_venda
     
-    # Pega dados atualizados para cálculo e notificação
     cliente_atualizada = st.session_state.clientes.loc[idx_cliente].iloc[0]
     novo_gasto_acumulado = cliente_atualizada['Gasto Acumulado']
     saldo_atualizado = cliente_atualizada['Cashback Disponível']
@@ -266,7 +264,6 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
     st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = True
 
-    # Lógica de Bônus (se houver)
     if not cliente_data['Primeira Compra Feita'] and cliente_data['Indicado Por']:
         indicador_nome = cliente_data['Indicado Por']
         idx_indicador = st.session_state.clientes[st.session_state.clientes['Nome'] == indicador_nome].index
@@ -277,11 +274,9 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, bonus_lanc], ignore_index=True)
             st.success(f"🎁 Bônus de R$ {bonus:.2f} creditado para {indicador_nome}!")
 
-    # Cria o registro da venda
     novo_lancamento = pd.DataFrame([{'Data': data_venda, 'Cliente': cliente_nome, 'Tipo': 'Venda', 'Valor Venda/Resgate': valor_venda, 'Valor Cashback': valor_cashback, 'Venda Turbo': 'Sim' if venda_turbo_selecionada else 'Não'}])
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
 
-    # Envio da mensagem para o Telegram
     if TELEGRAM_ENABLED:
         fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
         agora_brasil = datetime.now(fuso_horario_brasil)
@@ -290,7 +285,15 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
         cashback_ganho_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
-        mensagem_telegram = (
+        mensagem_header = (
+            "✨ *Novidade imperdível na Doce&Bella! a partir desse mes de outubro* ✨\n\n"
+            "Agora você pode aproveitar ainda mais as suas compras favoritas com o nosso Programa de Fidelidade 🛍💖\n\n"
+            "➡️ A cada compra, você acumula pontos.\n"
+            "➡️ Quanto mais você compra, mais descontos exclusivos você ganha!\n"
+            "---------------------------------\n\n"
+        )
+
+        mensagem_body = (
             f"Olá *{cliente_nome}*, aqui é o programa de fidelidade da loja Doce&Bella!\n\n"
             f"Você ganhou *{cashback_ganho_str}* em créditos CASHBACK.\n"
             f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n\n"
@@ -298,9 +301,9 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
         )
 
         if novo_nivel != nivel_antigo:
-            mensagem_telegram += f"\n\n🎉 Parabéns! Você subiu para o nível *{novo_nivel}*! Aproveite seus novos benefícios."
+            mensagem_body += f"\n\n🎉 Parabéns! Você subiu para o nível *{novo_nivel}*! Aproveite seus novos benefícios."
 
-        mensagem_telegram += (
+        mensagem_footer = (
             f"\n\n=================================\n\n"
             f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS*\n"
             f"- Resgate máximo: *50% sobre o valor da compra.*\n"
@@ -310,9 +313,8 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             f"⚠️ Adicione este número na sua agenda para ficar por dentro das novidades."
         )
         
-        enviar_mensagem_telegram(mensagem_telegram)
+        enviar_mensagem_telegram(mensagem_header + mensagem_body + mensagem_footer)
 
-    # Salva e finaliza
     salvar_dados()
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome} ({novo_nivel}).")
     st.rerun()
@@ -328,6 +330,60 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     salvar_dados()
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado para {cliente_nome}.")
+    st.rerun()
+
+def excluir_lancamento_venda(lancamento_index: int):
+    try:
+        lancamento = st.session_state.lancamentos.loc[lancamento_index]
+        if lancamento['Tipo'] != 'Venda':
+            st.error("Erro: Apenas lançamentos do tipo 'Venda' podem ser excluídos.")
+            return
+    except KeyError:
+        st.error("Erro: Lançamento não encontrado. A lista pode ter sido atualizada.")
+        return
+
+    cliente_nome = lancamento['Cliente']
+    valor_venda = pd.to_numeric(lancamento['Valor Venda/Resgate'], errors='coerce', default=0)
+    valor_cashback = pd.to_numeric(lancamento['Valor Cashback'], errors='coerce', default=0)
+
+    # Reverter dados do cliente
+    idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
+    if not idx_cliente.empty:
+        cliente_data_antes = st.session_state.clientes.loc[idx_cliente].iloc[0].copy()
+        
+        st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'] -= valor_venda
+        st.session_state.clientes.loc[idx_cliente, 'Cashback Disponível'] -= valor_cashback
+        
+        novo_gasto_acumulado = st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'].iloc[0]
+        novo_nivel, _, _ = calcular_nivel_e_beneficios(novo_gasto_acumulado)
+        st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
+
+        # Checar se a venda era a primeira e única de um cliente indicado
+        vendas_cliente = st.session_state.lancamentos[(st.session_state.lancamentos['Cliente'] == cliente_nome) & (st.session_state.lancamentos['Tipo'] == 'Venda')]
+        if len(vendas_cliente) == 1 and cliente_data_antes['Indicado Por']:
+            indicador_nome = cliente_data_antes['Indicado Por']
+            st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = False
+            
+            # Reverter bônus do indicador
+            idx_indicador = st.session_state.clientes[st.session_state.clientes['Nome'] == indicador_nome].index
+            if not idx_indicador.empty:
+                bonus_a_reverter = valor_venda * BONUS_INDICACAO_PERCENTUAL
+                st.session_state.clientes.loc[idx_indicador, 'Cashback Disponível'] -= bonus_a_reverter
+                
+                # Excluir lançamento de bônus
+                idx_bonus = st.session_state.lancamentos[
+                    (st.session_state.lancamentos['Cliente'] == indicador_nome) &
+                    (st.session_state.lancamentos['Tipo'] == 'Bônus Indicação') &
+                    (pd.to_numeric(st.session_state.lancamentos['Valor Venda/Resgate'], errors='coerce') == valor_venda)
+                ].index
+                if not idx_bonus.empty:
+                    st.session_state.lancamentos = st.session_state.lancamentos.drop(idx_bonus)
+
+    # Excluir o lançamento da venda
+    st.session_state.lancamentos = st.session_state.lancamentos.drop(lancamento_index).reset_index(drop=True)
+    
+    st.success(f"Venda de R$ {valor_venda:.2f} para {cliente_nome} foi excluída com sucesso.")
+    salvar_dados()
     st.rerun()
 
 # ==============================================================================
@@ -509,6 +565,31 @@ def render_relatorios():
     if not df_historico.empty:
         st.dataframe(df_historico.sort_values(by="Data", ascending=False), hide_index=True, use_container_width=True)
     else: st.info("Nenhum lançamento encontrado com os filtros selecionados.")
+    
+    # --- NOVA SEÇÃO: EXCLUIR VENDA ---
+    st.markdown("---")
+    st.subheader("🗑️ Excluir Lançamento de Venda")
+    vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda'].copy()
+    if vendas_df.empty:
+        st.warning("Nenhuma venda registrada para excluir.")
+    else:
+        vendas_df_sorted = vendas_df.sort_values(by="Data", ascending=False)
+        options_map = {
+            f"ID {index}: {row['Data'].strftime('%d/%m/%Y')} - {row['Cliente']} - R$ {row['Valor Venda/Resgate']}": index
+            for index, row in vendas_df_sorted.iterrows()
+        }
+        
+        option_selecionada = st.selectbox(
+            "Selecione a venda que deseja excluir:",
+            options=[''] + list(options_map.keys())
+        )
+        
+        if option_selecionada:
+            index_para_excluir = options_map[option_selecionada]
+            st.warning(f"**Atenção:** Você está prestes a excluir a venda selecionada. Esta ação irá estornar o valor e o cashback da conta do cliente. A ação não pode ser desfeita.")
+            if st.button("🔴 Confirmar Exclusão da Venda", type="primary"):
+                excluir_lancamento_venda(index_para_excluir)
+
 
 def render_home():
     st.header("Seja Bem-Vinda ao Painel de Gestão de Cashback Doce&Bella!")
