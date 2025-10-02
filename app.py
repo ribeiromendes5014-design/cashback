@@ -271,8 +271,10 @@ def carregar_dados_do_csv(file_path, df_columns):
     return df[df_columns]
 
 @st.cache_data(show_spinner="Carregando dados...")
-def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
-    """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
+def carregar_dados(data_version_key):  
+    """Força recarregamento sempre que data_version_key mudar."""
+    
+    _ = data_version_key  # <-- força o cache a depender da versão
     
     # 1. CLIENTES: Colunas
     CLIENTES_COLS = [
@@ -1470,6 +1472,7 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
