@@ -322,32 +322,33 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
         # Monta a mensagem final completa, começando com a novidade do Programa de Fidelidade.
-mensagem_telegram = (
-    # --- PARTE 1: Introdução sobre a Novidade do Programa de Fidelidade ---
-    "✨ Novidade imperdível na Doce&Bella! ✨\n\n"
-    "Agora você pode aproveitar ainda mais as suas compras favoritas com o nosso Programa de Fidelidade 🛍💖\n\n"
-    "➡ A cada compra, você acumula pontos.\n"
-    "➡ Quanto mais você compra, mais descontos exclusivos você ganha!\n\n"
-    
-    # --- PARTE 2: Mensagem de Cashback e Saldo ---
-    f"🎉 *PARABÉNS, {cliente_nome.upper()}! VOCÊ GANHOU CASHBACK!* 🎉\n\n"
-    f"A loja **Doce&Bella** te presenteia com *{cashback_ganho_str}* em novos créditos!\n\n"
-    
-    f"--- *Seu Saldo Atualizado* ---\n"
-    f"🗓️ **Data/Hora:** *{data_hora_lancamento}*\n"
-    f"💰 **Saldo Atual:** *{saldo_atual_str}*\n"
-    f"🛒 **Total de Compras:** *{numero_total_vendas}*\n"
-    f"----------------------------------\n\n"
-    
-    f"✨ *COMO USAR SEU CRÉDITO NA DOCE&BELLA*\n"
-    f"1. **Limite de Uso:** Você pode usar até *50%* do valor total da sua nova compra.\n"
-    f"2. **Saldo Mínimo:** Para resgatar, seu saldo deve ser de, no mínimo, *R$ 20,00*.\n\n"
-    
-    f"📞 *PRECISA DE AJUDA OU QUER CONSULTAR SEU SALDO?*\n"
-    f"Basta chamar a **Doce&Bella** pelo ZAP! 💬\n\n"
-    
-    f"🚨 Dica: Salve nosso número na sua agenda para não perder as promoções e novidades!"
-)
+        # CORREÇÃO DE INDENTAÇÃO APLICADA AQUI ABAIXO:
+        mensagem_telegram = (
+            # --- PARTE 1: Introdução sobre a Novidade do Programa de Fidelidade ---
+            "✨ Novidade imperdível na Doce&Bella! ✨\n\n"
+            "Agora você pode aproveitar ainda mais as suas compras favoritas com o nosso Programa de Fidelidade 🛍💖\n\n"
+            "➡ A cada compra, você acumula pontos.\n"
+            "➡ Quanto mais você compra, mais descontos exclusivos você ganha!\n\n"
+            
+            # --- PARTE 2: Mensagem de Cashback e Saldo ---
+            f"🎉 *PARABÉNS, {cliente_nome.upper()}! VOCÊ GANHOU CASHBACK!* 🎉\n\n"
+            f"A loja **Doce&Bella** te presenteia com *{cashback_ganho_str}* em novos créditos!\n\n"
+            
+            f"--- *Seu Saldo Atualizado* ---\n"
+            f"🗓️ **Data/Hora:** *{data_hora_lancamento}*\n"
+            f"💰 **Saldo Atual:** *{saldo_atual_str}*\n"
+            f"🛒 **Total de Compras:** *{numero_total_vendas}*\n"
+            f"----------------------------------\n\n"
+            
+            f"✨ *COMO USAR SEU CRÉDITO NA DOCE&BELLA*\n"
+            f"1. **Limite de Uso:** Você pode usar até *50%* do valor total da sua nova compra.\n"
+            f"2. **Saldo Mínimo:** Para resgatar, seu saldo deve ser de, no mínimo, *R$ 20,00*.\n\n"
+            
+            f"📞 *PRECISA DE AJUDA OU QUER CONSULTAR SEU SALDO?*\n"
+            f"Basta chamar a **Doce&Bella** pelo ZAP! 💬\n\n"
+            
+            f"🚨 Dica: Salve nosso número na sua agenda para não perder as promoções e novidades!"
+        )
         
         enviar_mensagem_telegram(mensagem_telegram)
 
@@ -941,4 +942,3 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
