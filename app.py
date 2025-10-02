@@ -246,6 +246,7 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
 def excluir_cliente(nome_cliente):
     """Exclui o cliente e todas as suas transações, depois salva."""
     
+    # 1. Remove da memória
     st.session_state.clientes = st.session_state.clientes[
         st.session_state.clientes['Nome'] != nome_cliente
     ].reset_index(drop=True)
@@ -254,10 +255,17 @@ def excluir_cliente(nome_cliente):
         st.session_state.lancamentos['Cliente'] != nome_cliente
     ].reset_index(drop=True)
     
+    # 2. Salva no GitHub e limpa o cache
     salvar_dados()
-    st.session_state.deleting_client = False
+    
+    # 3. CORREÇÃO: Remove o estado de exclusão e edição para forçar a atualização visual
+    if 'deleting_client' in st.session_state:
+        del st.session_state.deleting_client
+    if 'editing_client' in st.session_state:
+        del st.session_state.editing_client
+    
     st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
-    st.rerun()
+    st.rerun() # Força a reexecução, lendo o novo CSV do GitHub
 
 
 def cadastrar_cliente(nome, apelido, telefone):
@@ -322,7 +330,6 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
         # Monta a mensagem final completa, começando com a novidade do Programa de Fidelidade.
-        # CORREÇÃO DE INDENTAÇÃO APLICADA AQUI ABAIXO:
         mensagem_telegram = (
             # --- PARTE 1: Introdução sobre a Novidade do Programa de Fidelidade ---
             "✨ Novidade imperdível na Doce&Bella! ✨\n\n"
@@ -723,7 +730,9 @@ def render_cadastro():
                     excluir_cliente(cliente_selecionado_operacao)
             with col_cancela_del:
                 if st.button("↩️ Cancelar Exclusão", use_container_width=True, key='cancelar_exclusao'):
-                    st.session_state.deleting_client = False
+                    # CORREÇÃO: Remover a chave para limpeza completa de estado
+                    if 'deleting_client' in st.session_state:
+                         del st.session_state.deleting_client
                     st.rerun()  
         
     st.markdown("---")
