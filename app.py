@@ -328,8 +328,12 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         enviar_mensagem_telegram(mensagem_telegram)
 
 def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resgate, saldo_disponivel):
-    """Processa o resgate de cashback."""
+    """
+    Processa o resgate de cashback, salva os dados e envia notificação ao Telegram.
+    Atenção: A variável 'saldo_disponivel' é o saldo antes do resgate.
+    """
     
+    # --- 1. Validações Iniciais ---
     max_resgate = valor_venda_atual * 0.50
     if valor_resgate < 20:
         st.error(f"Erro: O resgate mínimo é de R$ 20,00.")
@@ -341,7 +345,13 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
         st.error(f"Erro: Saldo de cashback insuficiente (Disponível: R$ {saldo_disponivel:.2f}).")
         return
         
+    # --- 2. Processa a Transação ---
     st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'] -= valor_resgate
+    
+    # Obtém o saldo ATUALIZADO (após a dedução) antes de salvar
+    saldo_apos_resgate = st.session_state.clientes.loc[
+        st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'
+    ].iloc[0]
     
     novo_lancamento = pd.DataFrame({
         'Data': [data_resgate],
@@ -354,6 +364,29 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     
     salvar_dados()  
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
+
+    # --- 3. Lógica de Envio para o Telegram (CORRIGIDA) ---
+    if TELEGRAM_ENABLED:
+        
+        # --- Fuso Horário Brasil ---
+        fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
+        agora_brasil = datetime.now(fuso_horario_brasil)
+        data_hora_lancamento = agora_brasil.strftime('%d/%m/%Y às %H:%M')
+        
+        # Formatação de valores (R$ 1.000,00)
+        valor_resgate_str = f"R$ {valor_resgate:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        saldo_apos_resgate_str = f"R$ {saldo_apos_resgate:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
+        # Monta a mensagem final no formato solicitado
+        mensagem_telegram = (
+            f"🛒 *Loja Doce&Bella: RESGATE DE CASHBACK*\n\n"
+            f"Você (*{cliente_nome}*) resgatou *{valor_resgate_str}* em *{data_hora_lancamento}*.\n\n"
+            f"❤ Seu saldo em conta é de *{saldo_apos_resgate_str}*.\n\n"
+            f"Obrigado pela preferência! :)\n\n"
+            f"========================="
+        )
+        
+        enviar_mensagem_telegram(mensagem_telegram)
 
 
 # ==============================================================================
@@ -887,6 +920,7 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
