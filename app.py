@@ -901,8 +901,8 @@ def render_produtos_turbo():
     # ------------------
     # --- NOVO CADASTRO ---
     # ------------------
-    st.subheader("Cadastrar Novo Produto Turbo")
     with st.form("form_cadastro_produto", clear_on_submit=True):
+        st.subheader("Cadastrar Novo Produto Turbo")
         nome_produto = st.text_input("Nome do Produto (Ex: Linha Cabelo X)", key='cadastro_produto_nome')
         col_data_inicio, col_data_fim = st.columns(2)
         with col_data_inicio:
@@ -980,9 +980,8 @@ def render_cadastro():
     if 'is_indicado_check' not in st.session_state:
          st.session_state.is_indicado_check = False
          
-    # Checkbox para indicar se houve indicação (FORÇA RERUN IMEDIATA)
-    # Usamos o value para garantir que ele mantenha o estado visual após recarregar.
-    st.session_state.is_indicado_check = st.checkbox(
+    # Checkbox para indicar se houve indicação (CORREÇÃO AQUI - Removida a atribuição)
+    st.checkbox(
         "Esta cliente foi indicada por outra?", 
         value=st.session_state.get('is_indicado_check', False), 
         key='is_indicado_check'
@@ -1040,6 +1039,7 @@ def render_cadastro():
         
         if submitted_cadastro:
             # Captura o valor final do indicador do session state, que foi atualizado fora do form.
+            # Verifica se o checkbox foi marcado ANTES de tentar buscar o valor do seletor
             indicado_por_final = st.session_state.get('indicador_nome_select', '') if st.session_state.get('is_indicado_check', False) else ''
             
             # Use as keys do session state para pegar os dados do form
