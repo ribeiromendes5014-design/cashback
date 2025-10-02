@@ -25,7 +25,7 @@ LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
 # Configuração do logo para o novo layout
-LOGO_DOCEBELLA_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" # Novo link para o logo
+LOGO_DOCEBELLA_URL = "https://i.ibb.co/cdqJ92W/Logo-Doce-Bella-Cosm-tico.png" # Novo link para o logo
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -755,3 +755,4 @@ if 'editing_client' not in st.session_state:
     st.session_state.editing_client = False
 if 'deleting_client' not in st.session_state:
     st.session_state.deleting_client = False
+
