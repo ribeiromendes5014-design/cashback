@@ -183,7 +183,8 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
 # --- Funções de Carregamento/Salvamento ---
 
 def salvar_dados():
-    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache e recarrega os dados."""
+    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. 
+    Limpa o cache e recarrega os dados atualizados."""
     
     # Limpa o cache para forçar a releitura dos CSVs.
     st.cache_data.clear() 
@@ -202,8 +203,9 @@ def salvar_dados():
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
         st.session_state.produtos_turbo.to_csv(PRODUTOS_TURBO_CSV, index=False)
 
-    # ✅ Recarrega os DataFrames atualizados no session_state
+    # ✅ Recarrega os DataFrames do CSV atualizado para a memória
     carregar_dados(st.session_state.data_version)
+
 
 
 # --- Funções de Carregamento/Salvamento ---
@@ -1466,4 +1468,5 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
