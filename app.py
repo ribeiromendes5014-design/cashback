@@ -26,7 +26,7 @@ CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
 # Configuração do logo para o novo layout
 LOGO_DOCEBELLA_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" # Link do logo
-LOGO_ALT_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" 
+LOGO_ALT_URL = "https://i.ibb.co/fYCWBKTm/Logo-Doce-Bella-Cosm-tico.png" 
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -767,3 +767,4 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
