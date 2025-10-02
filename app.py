@@ -133,7 +133,8 @@ def load_csv_github(url: str) -> pd.DataFrame | None:
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        df = pd.read_csv(StringIO(response.text), dtype=str)
+        # Ao carregar, mantemos como dtype=str para evitar inferência errada inicial
+        df = pd.read_csv(StringIO(response.text), dtype=str) 
         if df.empty or len(df.columns) < 2:
             return None
         return df
@@ -210,22 +211,27 @@ def carregar_dados_do_csv(file_path, df_columns):
         
     elif os.path.exists(file_path): 
         try: 
-            df = pd.read_csv(file_path)
+            df = pd.read_csv(file_path, dtype=str) # Leitura sempre como string
         except pd.errors.EmptyDataError:
             pass
             
-    # Garante que todas as colunas existem
+    # Garante que todas as colunas existem e inicializa valores padrão
     for col in df_columns:
         if col not in df.columns: 
-            # Inicializa colunas que devem ser numéricas como 0.0
-            if col in ['Cashback Disponível', 'Gasto Acumulado']:
-                df[col] = 0.0
-            # Inicializa colunas booleanas como False
-            elif col in ['Primeira Compra Feita', 'Ativo']:
-                df[col] = False
-            else:
-                df[col] = ""  
+            df[col] = "" # Inicia como string vazia
         
+    # CORREÇÃO: Preenche valores NaN/vazios em colunas que sabemos que devem ter um valor padrão
+    if 'Cashback Disponível' in df.columns:
+        df['Cashback Disponível'] = df['Cashback Disponível'].fillna('0.0')
+    if 'Gasto Acumulado' in df.columns:
+        df['Gasto Acumulado'] = df['Gasto Acumulado'].fillna('0.0')
+    if 'Nivel Atual' in df.columns:
+        df['Nivel Atual'] = df['Nivel Atual'].fillna('Prata')
+    if 'Primeira Compra Feita' in df.columns:
+        df['Primeira Compra Feita'] = df['Primeira Compra Feita'].fillna('False')
+    if 'Venda Turbo' in df.columns:
+        df['Venda Turbo'] = df['Venda Turbo'].fillna('Não')
+    
     return df[df_columns]
 
 @st.cache_data(show_spinner="Carregando dados...")
@@ -249,21 +255,29 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     st.session_state.produtos_turbo = carregar_dados_do_csv(PRODUTOS_TURBO_CSV, PRODUTOS_TURBO_COLS)
 
     
-    # --- Inicialização e Tipagem Clientes ---
+    # --- Inicialização e Tipagem Clientes (CORRIGIDA) ---
     if 'clientes' not in st.session_state or st.session_state.clientes.empty:
         st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS)
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00, 0.00, 'Prata', '', False]
         
-    st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
-    st.session_state.clientes['Gasto Acumulado'] = pd.to_numeric(st.session_state.clientes['Gasto Acumulado'], errors='coerce').fillna(0.0)
-    st.session_state.clientes['Primeira Compra Feita'] = st.session_state.clientes['Primeira Compra Feita'].astype(bool)
+    # FORÇA a conversão de string para o tipo correto para evitar problemas de visualização
+    st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(
+        st.session_state.clientes['Cashback Disponível'], errors='coerce'
+    ).fillna(0.0)
+    st.session_state.clientes['Gasto Acumulado'] = pd.to_numeric(
+        st.session_state.clientes['Gasto Acumulado'], errors='coerce'
+    ).fillna(0.0)
+    # Converte 'True'/'False' string para bool
+    st.session_state.clientes['Primeira Compra Feita'] = st.session_state.clientes['Primeira Compra Feita'].astype(str).str.lower().map({'true': True, 'false': False}).fillna(False).astype(bool)
+    # Preenche strings vazias em Nivel Atual com 'Prata' (caso venha vazia)
+    st.session_state.clientes['Nivel Atual'] = st.session_state.clientes['Nivel Atual'].fillna('Prata')
 
 
     # --- Tipagem Lançamentos ---
     if not st.session_state.lancamentos.empty:
         st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
         # Garante que 'Venda Turbo' seja string ou booleano para evitar erro de tipo na exibição
-        st.session_state.lancamentos['Venda Turbo'] = st.session_state.lancamentos['Venda Turbo'].astype(str).replace({'True': 'Sim', 'False': 'Não', '': 'Não'})
+        st.session_state.lancamentos['Venda Turbo'] = st.session_state.lancamentos['Venda Turbo'].astype(str).replace({'True': 'Sim', 'False': 'Não', '': 'Não'}).fillna('Não')
 
     # --- Tipagem Produtos Turbo ---
     if 'produtos_turbo' not in st.session_state:
@@ -273,7 +287,7 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
         st.session_state.produtos_turbo['Data Início'] = pd.to_datetime(st.session_state.produtos_turbo['Data Início'], errors='coerce').dt.date
         st.session_state.produtos_turbo['Data Fim'] = pd.to_datetime(st.session_state.produtos_turbo['Data Fim'], errors='coerce').dt.date
         # Garante que 'Ativo' seja booleano
-        st.session_state.produtos_turbo['Ativo'] = st.session_state.produtos_turbo['Ativo'].astype(str).map({'True': True, 'False': False, 'Sim': True, 'Não': False}).fillna(False).astype(bool)
+        st.session_state.produtos_turbo['Ativo'] = st.session_state.produtos_turbo['Ativo'].astype(str).str.lower().map({'true': True, 'false': False}).fillna(False).astype(bool)
     
 
 # --- Funções do Programa de Fidelidade ---
@@ -980,7 +994,7 @@ def render_cadastro():
     if 'is_indicado_check' not in st.session_state:
          st.session_state.is_indicado_check = False
          
-    # Checkbox para indicar se houve indicação (CORREÇÃO AQUI - Removida a atribuição)
+    # Checkbox para indicar se houve indicação (AGORA FUNCIONAL)
     st.checkbox(
         "Esta cliente foi indicada por outra?", 
         value=st.session_state.get('is_indicado_check', False), 
