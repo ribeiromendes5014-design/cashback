@@ -122,7 +122,7 @@ def load_csv_github(url: str) -> pd.DataFrame | None:
         return None
 
 def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str):
-    """Salva o DataFrame CSV no GitHub usando a API (PyGithub)."""
+    """Salva o DataFrame CSV no GitHub com logging de erro aprimorado."""
     if PERSISTENCE_MODE != "GITHUB":
         return False
 
@@ -140,13 +140,27 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         try:
             contents = repo.get_contents(file_path, ref=BRANCH)
             repo.update_file(contents.path, commit_message, csv_string, contents.sha, branch=BRANCH)
-            st.toast(f"✅ Arquivo {file_path} salvo no GitHub.")
+            st.toast(f"✅ Arquivo {file_path} atualizado no GitHub.")
         except Exception:
+            # Se get_contents falhar, o arquivo pode não existir, então criamos
             repo.create_file(file_path, commit_message, csv_string, branch=BRANCH)
             st.toast(f"✅ Arquivo {file_path} criado no GitHub.")
+        
         return True
+
     except Exception as e:
-        st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
+        # ---- MELHORIA NO LOG DE ERRO ----
+        st.error(f"❌ ERRO CRÍTICO ao salvar '{file_path}' no GitHub. Verifique as logs do Streamlit.")
+        
+        error_message = str(e)
+        if hasattr(e, 'data') and 'message' in e.data:
+            error_message = f"{e.status} - {e.data['message']}"
+
+        st.error(f"Detalhes do Erro: {error_message}")
+
+        print(f"--- ERRO DETALHADO GITHUB [{file_path}] ---")
+        print(repr(e))
+        print("-----------------------------------------")
         return False
 
 
@@ -322,7 +336,6 @@ def excluir_cliente(nome_cliente):
     ].reset_index(drop=True)
     
     salvar_dados()
-    st.session_state.deleting_client = False
     st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
     st.rerun()
 
@@ -530,6 +543,7 @@ def render_lancamento():
             valor_venda_resgate = st.number_input("Valor da Venda Atual (para cálculo do limite):", min_value=0.01, format="%.2f")
             valor_resgate = st.number_input("Valor do Resgate (Mínimo R$20,00):", min_value=0.00, format="%.2f")
             data_resgate = st.date_input("Data do Resgate:", value=date.today())
+            saldo_atual = 0.0
 
             if cliente_resgate:
                 saldo_atual = st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_resgate, 'Cashback Disponível'].iloc[0]
@@ -670,6 +684,13 @@ PAGINAS = {
 # ==============================================================================
 # EXECUÇÃO PRINCIPAL
 # ==============================================================================
+
+# Bloco de Diagnóstico (Adicionado para depuração)
+st.info(f"Modo de Persistência Ativo: {PERSISTENCE_MODE}")
+if PERSISTENCE_MODE == 'GITHUB':
+    st.success("✅ Configurado para salvar no GitHub.")
+else:
+    st.warning("⚠️ ATENÇÃO: Configurado para salvar localmente. As alterações NÃO serão enviadas para o GitHub.")
 
 # Inicialização de variáveis de estado da UI
 if 'editing_client' not in st.session_state: st.session_state.editing_client = False
