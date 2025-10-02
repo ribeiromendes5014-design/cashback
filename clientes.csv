@@ -1,3 +1,4 @@
 Nome,Apelido/Descrição,Telefone,Cashback Disponível,Gasto Acumulado,Nivel Atual,Indicado Por,Primeira Compra Feita
 Isabelly Santos,isa de gabriel,,1.65,0.0,,,True
-Renan,,,0.0,0.0,Prata,,False
+Renan,,,0.0,0.0,Prata,,True
+Maria,,,0.0,0.0,Prata,Renan,False
