@@ -266,7 +266,7 @@ def cadastrar_cliente(nome, apelido, telefone):
 def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     """Lança uma venda, atualiza o cashback do cliente, salva e envia notificação ao Telegram."""
     
-    # 1. Atualiza o saldo e registra o lançamento (Seu código original)
+    # 1. Atualiza o saldo e registra o lançamento
     st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'] += valor_cashback
     
     novo_lancamento = pd.DataFrame({
@@ -284,34 +284,43 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     # 2. Lógica de Envio para o Telegram (NOVO CÓDIGO)
     if TELEGRAM_ENABLED:
         
-        # Filtra SÓ as vendas para contar o histórico (o novo lançamento já está no DF)
+        # Filtra SÓ as vendas (incluindo a atual)
         vendas_do_cliente = st.session_state.lancamentos[
             (st.session_state.lancamentos['Cliente'] == cliente_nome) & 
             (st.session_state.lancamentos['Tipo'] == 'Venda')
-        ]
+        ].copy()
         
-        # O número total de vendas é o tamanho desse filtro
-        numero_vendas_total = len(vendas_do_cliente)
+        # Converte para numérico (necessário se o CSV salvar como string)
+        vendas_do_cliente['Valor Venda/Resgate'] = pd.to_numeric(vendas_do_cliente['Valor Venda/Resgate'], errors='coerce').fillna(0)
+        
+        # Calcula o total de compras do cliente
+        total_compras = vendas_do_cliente['Valor Venda/Resgate'].sum()
         
         # Obtém o saldo atualizado
         saldo_atualizado = st.session_state.clientes.loc[
             st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'
         ].iloc[0]
         
-        # Formata para padrão brasileiro (R$ 1.000,00)
-        # Use o locale 'pt_BR' para formatação ideal, mas aqui fazemos manual:
-        valor_venda_str = f"R$ {valor_venda:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        cashback_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        saldo_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        # Formatação de valores e datas
+        cashback_ganho_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        total_compras_str = f"R$ {total_compras:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        data_hora_lancamento = date.today().strftime('%d/%m/%Y às %H:%M')
         
-        # Monta a mensagem usando Markdown
+        # Monta a mensagem final exatamente no formato solicitado, usando Markdown para negrito
         mensagem_telegram = (
-            f"🔔 *NOVA VENDA LANÇADA - Doce&Bella* 🔔\n\n"
-            f"👤 *Cliente:* {cliente_nome}\n"
-            f"💸 *Valor da Venda:* {valor_venda_str}\n"
-            f"🎁 *Cashback Gerado:* {cashback_str}\n\n"
-            f"📊 *Total de Vendas:* *{numero_vendas_total}*\n"
-            f"💳 *Cashback Disponível:* *{saldo_str}*"
+            f"Olá *{cliente_nome}*, aqui é o programa de fidelidade da loja Doce&Bella\n\n"
+            f"Você ganhou *{cashback_ganho_str}* em créditos CASHBACK.\n\n"
+            f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n"
+            f"Total acumulado em compras: *{total_compras_str}*\n\n"
+            f"=================================\n\n"
+            f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS NO DELIVERY*\n"
+            f"- Máximo de resgate Cashback: *50.00% sobre o valor do pedido.*\n"
+            f"- Ter no mínimo *R$ 20,00* de saldo em conta. \n" # Mantenho R$ 20,00 da sua regra original no código Python
+            f" \n"
+            f"🧑‍💻 *CONSULTE SEU SALDO CONOSCO*\n"
+            f"💬 *CHAME A loja Doce&Bella NO ZAP*\n\n"
+            f"⚠️ Adicione este número na sua agenda para ficar por dentro das novidades"
         )
         
         enviar_mensagem_telegram(mensagem_telegram)
@@ -876,3 +885,4 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
