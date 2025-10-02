@@ -249,13 +249,24 @@ def cadastrar_cliente(nome, apelido, telefone, indicado_por=''):
 def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_turbo_selecionada: bool):
     idx_cliente = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_nome].index
     if idx_cliente.empty: st.error(f"Erro: Cliente '{cliente_nome}' não encontrado."); return
+    
     cliente_data = st.session_state.clientes.loc[idx_cliente].iloc[0]
+    nivel_antigo = cliente_data['Nivel Atual']
+
+    # Atualiza dados da cliente
     st.session_state.clientes.loc[idx_cliente, 'Cashback Disponível'] += valor_cashback
     st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'] += valor_venda
-    novo_gasto_acumulado = st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'].iloc[0]
+    
+    # Pega dados atualizados para cálculo e notificação
+    cliente_atualizada = st.session_state.clientes.loc[idx_cliente].iloc[0]
+    novo_gasto_acumulado = cliente_atualizada['Gasto Acumulado']
+    saldo_atualizado = cliente_atualizada['Cashback Disponível']
+
     novo_nivel, _, _ = calcular_nivel_e_beneficios(novo_gasto_acumulado)
     st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
     st.session_state.clientes.loc[idx_cliente, 'Primeira Compra Feita'] = True
+
+    # Lógica de Bônus (se houver)
     if not cliente_data['Primeira Compra Feita'] and cliente_data['Indicado Por']:
         indicador_nome = cliente_data['Indicado Por']
         idx_indicador = st.session_state.clientes[st.session_state.clientes['Nome'] == indicador_nome].index
@@ -265,11 +276,47 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
             bonus_lanc = pd.DataFrame([{'Data': data_venda, 'Cliente': indicador_nome, 'Tipo': 'Bônus Indicação', 'Valor Venda/Resgate': valor_venda, 'Valor Cashback': bonus, 'Venda Turbo': 'Não'}])
             st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, bonus_lanc], ignore_index=True)
             st.success(f"🎁 Bônus de R$ {bonus:.2f} creditado para {indicador_nome}!")
+
+    # Cria o registro da venda
     novo_lancamento = pd.DataFrame([{'Data': data_venda, 'Cliente': cliente_nome, 'Tipo': 'Venda', 'Valor Venda/Resgate': valor_venda, 'Valor Cashback': valor_cashback, 'Venda Turbo': 'Sim' if venda_turbo_selecionada else 'Não'}])
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
+
+    # Envio da mensagem para o Telegram
+    if TELEGRAM_ENABLED:
+        fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
+        agora_brasil = datetime.now(fuso_horario_brasil)
+        data_hora_lancamento = agora_brasil.strftime('%d/%m/%Y às %H:%M')
+        
+        cashback_ganho_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
+        mensagem_telegram = (
+            f"Olá *{cliente_nome}*, aqui é o programa de fidelidade da loja Doce&Bella!\n\n"
+            f"Você ganhou *{cashback_ganho_str}* em créditos CASHBACK.\n"
+            f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n\n"
+            f"⭐ Seu nível atual é: *{novo_nivel}*"
+        )
+
+        if novo_nivel != nivel_antigo:
+            mensagem_telegram += f"\n\n🎉 Parabéns! Você subiu para o nível *{novo_nivel}*! Aproveite seus novos benefícios."
+
+        mensagem_telegram += (
+            f"\n\n=================================\n\n"
+            f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS*\n"
+            f"- Resgate máximo: *50% sobre o valor da compra.*\n"
+            f"- Saldo mínimo para resgate: *R$ 20,00*.\n"
+            f" \n"
+            f"💬 *Fale conosco para consultar seu saldo e resgatar!*\n\n"
+            f"⚠️ Adicione este número na sua agenda para ficar por dentro das novidades."
+        )
+        
+        enviar_mensagem_telegram(mensagem_telegram)
+
+    # Salva e finaliza
     salvar_dados()
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome} ({novo_nivel}).")
     st.rerun()
+
 
 def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resgate, saldo_disponivel):
     max_resgate = valor_venda_atual * 0.50
@@ -520,9 +567,8 @@ def render_header():
 if 'editing_client' not in st.session_state: st.session_state.editing_client = False
 if 'deleting_client' not in st.session_state: st.session_state.deleting_client = False
 if 'valor_venda' not in st.session_state: st.session_state.valor_venda = 0.00
-if 'data_version' not in st.session_state: st.session_state.data_version = 0 # Mantido para não quebrar, mas não é mais a lógica principal
+if 'data_version' not in st.session_state: st.session_state.data_version = 0
 
-# Carregamento de dados (nova lógica)
 if 'clientes' not in st.session_state:
     st.session_state.clientes, st.session_state.lancamentos, st.session_state.produtos_turbo = carregar_dados()
 
