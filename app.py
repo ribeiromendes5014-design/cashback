@@ -9,9 +9,11 @@ CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03
 
-# Determina o modo de persistência (GitHub se o token estiver em secrets)
-# O Streamlit Community Cloud exige o uso de st.secrets para acessar o token.
-GITHUB_CONFIG = st.secrets.get("connections", {}).get("github", {})
+# CORREÇÃO: Tenta obter a configuração do GitHub de ambos os formatos: [github] ou [connections.github]
+# Isto garante que a configuração seja lida corretamente, dado que o secrets.toml usa o formato [github]
+GITHUB_CONFIG = st.secrets.get("github") or st.secrets.get("connections", {}).get("github", {})
+
+# Verifica se o token foi lido com sucesso para definir o modo
 PERSISTENCE_MODE = "GITHUB" if GITHUB_CONFIG and GITHUB_CONFIG.get("token") else "LOCAL"
 
 # --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
@@ -29,6 +31,7 @@ def carregar_dados_github(file_path, df_columns):
         return pd.DataFrame(columns=df_columns)
 
 def salvar_dados_github(file_path, df):
+    """Salva dados usando a conexão GitHub Storage (fazendo um commit)."""
     try:
         conn = st.connection("github", type="experimental_github_storage")
         csv_buffer = io.StringIO()
@@ -43,7 +46,6 @@ def salvar_dados_github(file_path, df):
     except Exception as e:
         st.error(f"ERRO CRÍTICO: Não foi possível salvar '{file_path}' no GitHub. Verifique as permissões do token. Detalhes: {e}")
         return False
-
         
 def carregar_dados():
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
@@ -516,5 +518,3 @@ with tab3:
             st.info("Nenhum lançamento encontrado com os filtros selecionados.")
     else:
         st.info("Nenhum lançamento registrado no histórico.")
-
-
