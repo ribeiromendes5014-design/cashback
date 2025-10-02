@@ -26,7 +26,6 @@ CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
 # Configuração do logo para o novo layout
 LOGO_DOCEBELLA_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" # Link do logo
-LOGO_ALT_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" 
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -111,7 +110,6 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
 
 # --- Funções de Carregamento/Salvamento ---
 
-# Função salva-dados deve estar no topo para uso em carregar_dados
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
     if PERSISTENCE_MODE == "GITHUB":
@@ -639,7 +637,7 @@ def render_home():
     vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda']
     
     total_vendas_mes = 0.0
-    # CORREÇÃO: Tratamento de KeyError e Data
+    
     if not vendas_df.empty:
         # Garante que a coluna 'Data' seja tratada corretamente
         vendas_df_copy = vendas_df.copy()
@@ -748,20 +746,28 @@ def render_header():
 
 # --- EXECUÇÃO PRINCIPAL ---
 
-# Inicialização e Carregamento de Dados
-# 1. Inicializa o estado da sessão para evitar o erro 'AttributeError: 'st._SessionStateProxy' object has no attribute 'clientes''
-if 'clientes' not in st.session_state or 'lancamentos' not in st.session_state:
-    carregar_dados()
-
+# 1. Inicialização de DataFrames vazios para evitar 'AttributeError'
+if 'clientes' not in st.session_state:
+    st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
+if 'lancamentos' not in st.session_state:
+    st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
+    
 # 2. Garante que as variáveis de estado de edição e deleção existam
 if 'editing_client' not in st.session_state:
     st.session_state.editing_client = False
 if 'deleting_client' not in st.session_state:
     st.session_state.deleting_client = False
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
+
+
+# 3. Carregamento: Só chama carregar_dados() se os dados ainda não foram carregados na sessão.
+if not st.session_state.data_loaded:
+    carregar_dados()
+    st.session_state.data_loaded = True
 
 # Renderiza o cabeçalho customizado no topo da página
 render_header()
-
 
 # Renderização do conteúdo da página selecionada
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
