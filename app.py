@@ -28,20 +28,38 @@ CASHBACK_PERCENTUAL = 0.03
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
-    # CORREÇÃO: Acessa os segredos assumindo que estão na raiz do secrets.toml (formato mais comum)
+    # Tenta ler o formato mais robusto (direto na raiz)
     TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_OWNER = st.secrets["REPO_OWNER"]
     REPO_NAME = st.secrets["REPO_NAME"]
     BRANCH = st.secrets.get("BRANCH", "main")
     
-    # URL base para leitura (raw content)
-    URL_BASE_REPOS = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/"
-    PERSISTENCE_MODE = "GITHUB"
-    
 except KeyError:
-    # Fallback para o modo LOCAL se o token não for encontrado
-    st.warning("⚠️ Chaves 'GITHUB_TOKEN', 'REPO_OWNER' ou 'REPO_NAME' faltando em secrets.toml. Usando Modo Local.")
-    PERSISTENCE_MODE = "LOCAL"
+    # CORREÇÃO CRÍTICA: Tenta ler o formato [github] que o usuário está usando e separa o 'repository'
+    github_section = st.secrets.get("github")
+    
+    if github_section and github_section.get("token") and github_section.get("repository"):
+        TOKEN = github_section["token"]
+        
+        # O valor 'ribeiromendes5014-design/cashback' é dividido
+        repo_full = github_section["repository"]
+        if "/" in repo_full:
+            REPO_OWNER = repo_full.split("/")[0]
+            REPO_NAME = repo_full.split("/")[1]
+        else:
+            raise KeyError("O valor de 'repository' em secrets.toml deve ser no formato 'OWNER/NOME-REPO'.")
+            
+        BRANCH = github_section.get("branch", "main")
+        PERSISTENCE_MODE = "GITHUB"
+    else:
+        # Fallback se nenhuma das estruturas funcionar
+        st.warning("⚠️ Chaves de acesso ao GitHub não encontradas no secrets.toml. Usando Modo Local.")
+        PERSISTENCE_MODE = "LOCAL"
+
+# Define URL base se o modo for GITHUB
+if PERSISTENCE_MODE == "GITHUB":
+    URL_BASE_REPOS = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/"
+
 
 # --- Funções de Persistência via GitHub API (PyGithub) ---
 
