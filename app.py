@@ -101,7 +101,6 @@ def enviar_mensagem_telegram(mensagem: str):
 
 # --- Funções de Persistência via GitHub API (PyGithub) ---
 
-# CORREÇÃO: Função agora recebe a chave de versão para ser usada como cachebuster
 def load_csv_github(url: str, version_key: int) -> pd.DataFrame | None:
     """Carrega um CSV do GitHub usando a URL raw, forçando o cachebuster."""
     
@@ -169,7 +168,6 @@ def salvar_dados():
         st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
         
-# CORREÇÃO: Função agora recebe a chave de versão para passar adiante
 def carregar_dados_do_csv(file_path, df_columns, version_key):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
     df = pd.DataFrame(columns=df_columns)  
@@ -193,34 +191,35 @@ def carregar_dados_do_csv(file_path, df_columns, version_key):
     return df[df_columns]
 
 @st.cache_data(show_spinner="Carregando dados...")
-def carregar_dados(data_version_key): # <-- ESTE ARGUMENTO É A CHAVE DE INVALIDAÇÃO
-    """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
+# CORREÇÃO CRÍTICA: A função agora retorna TUDO em um dicionário
+def carregar_dados(data_version_key): 
+    """Carrega os DataFrames e retorna-os, garantindo que o cache seja mantido."""
     
-    st.session_state.clientes = carregar_dados_do_csv(
-        CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'], data_version_key # CHAVE PASSADA
+    clientes_df = carregar_dados_do_csv(
+        CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'], data_version_key
     )
     
-    st.session_state.lancamentos = carregar_dados_do_csv(
-        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'], data_version_key # CHAVE PASSADA
+    lancamentos_df = carregar_dados_do_csv(
+        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'], data_version_key
     )
     
-    # ... o resto da inicialização continua aqui ...
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
-    if 'lancamentos' not in st.session_state:
-        st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
-
-
-    if st.session_state.clientes.empty:
+    # Processamento de limpeza e inicialização dos DFs lidos:
+    if clientes_df.empty:
         # Cria um cliente de exemplo se o DF estiver vazio
-        st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        salvar_dados()  # Salva para criar os arquivos iniciais no GitHub/Local
+        clientes_df.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
+        # NOTA: Não chamamos salvar_dados() aqui para evitar recursão infinita no primeiro load.
         
-    st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
+    clientes_df['Cashback Disponível'] = pd.to_numeric(clientes_df['Cashback Disponível'], errors='coerce').fillna(0.0)
 
-    if not st.session_state.lancamentos.empty:
-        st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
+    if not lancamentos_df.empty:
+        lancamentos_df['Data'] = pd.to_datetime(lancamentos_df['Data'], errors='coerce').dt.date
     
+    # 🟢 NOVO: Retorna o dicionário com os DataFrames
+    return {
+        'clientes': clientes_df,
+        'lancamentos': lancamentos_df
+    }
+
 
 # --- Funções de Manipulação de Clientes e Transações ---
 
@@ -976,15 +975,24 @@ if 'deleting_client' not in st.session_state:
 if 'valor_venda' not in st.session_state:
     st.session_state.valor_venda = 0.00
     
-# 🟢 NOVO: Inicialização da chave de controle de versão
+# 🟢 Inicialização da chave de controle de versão
 if 'data_version' not in st.session_state:
     st.session_state.data_version = 0
 
+# 3. CORREÇÃO CRÍTICA: Carregamos os DFs do cache/GitHub e os armazenamos no st.session_state
+# A chamada a carregar_dados agora retorna os DataFrames.
+df_cache = carregar_dados(st.session_state.data_version)
 
-# 3. Carregamento: Chamamos a função carregar_dados. O cache é limpo em salvar_dados()
-# o que garante que o carregamento do GitHub ocorra após cada alteração.
-# A chave de versão (st.session_state.data_version) é o argumento que força a reexecução.
-carregar_dados(st.session_state.data_version)
+# 🟢 Armazena os DataFrames retornados pelo cache na sessão
+st.session_state.clientes = df_cache['clientes']
+st.session_state.lancamentos = df_cache['lancamentos']
+
+# Se o DataFrame de clientes estiver vazio no PRIMEIRO carregamento, adiciona o exemplo
+# e salva, garantindo que o CSV inicial seja criado no GitHub.
+if st.session_state.clientes.empty and len(st.session_state.clientes.index) < 1:
+    st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
+    salvar_dados()  # Salva para criar os arquivos iniciais no GitHub/Local
+    st.rerun() # Reruns para carregar a nova versão dos arquivos iniciais
 
 # Renderiza o cabeçalho customizado no topo da página
 render_header()
