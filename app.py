@@ -150,7 +150,6 @@ def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
     
     # 🟢 CORREÇÃO: Limpamos o cache e, mais importante, incrementamos a chave de versão.
-    # Esta chave força a reexecução do carregar_dados() no próximo rerun.
     st.cache_data.clear() 
 
     if 'data_version' not in st.session_state:
@@ -334,7 +333,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
         
         # Monta a mensagem final completa, começando com a novidade do Programa de Fidelidade.
         mensagem_telegram = (
-            # --- PARTE 1: Introdução sobre a Novidade do Programa de Fidelidade ---
+            # --- PARTE 1: Introdução sobre o Programa de Fidelidade ---
             "✨ Novidade imperdível na Doce&Bella! ✨\n\n"
             "Agora você pode aproveitar ainda mais as suas compras favoritas com o nosso Programa de Fidelidade 🛍💖\n\n"
             "➡ A cada compra, você acumula pontos.\n"
@@ -627,6 +626,41 @@ def render_lancamento():
                         resgatar_cashback(cliente_resgate, valor_resgate, valor_venda_resgate, data_resgate, saldo_atual)
                     else:
                         st.error("Erro ao calcular saldo. Cliente não encontrado.")
+
+    # --- NOVO BLOCO: Exibe Histórico do Cliente Selecionado (em Venda ou Resgate) ---
+    # Nota: Usamos 'nome_cliente_venda' e 'nome_cliente_resgate' para definir quem está sendo manipulado
+    
+    # Decide qual nome de cliente usar para a consulta de histórico
+    cliente_para_historico = ''
+    if operacao == "Lançar Nova Venda" and 'nome_cliente_venda' in st.session_state and st.session_state.nome_cliente_venda:
+        cliente_para_historico = st.session_state.nome_cliente_venda
+    elif operacao == "Resgatar Cashback" and 'nome_cliente_resgate' in st.session_state and st.session_state.nome_cliente_resgate:
+        cliente_para_historico = st.session_state.nome_cliente_resgate
+        
+    if cliente_para_historico:
+        st.markdown("---")
+        st.subheader(f"Histórico de Transações de: *{cliente_para_historico}*")
+        
+        # Filtra o DataFrame de lançamentos pelo cliente
+        df_historico_cliente = st.session_state.lancamentos[
+            st.session_state.lancamentos['Cliente'] == cliente_para_historico
+        ].copy()
+        
+        if not df_historico_cliente.empty:
+            # Formata os valores para exibição
+            df_historico_cliente['Valor Venda/Resgate'] = pd.to_numeric(df_historico_cliente['Valor Venda/Resgate'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
+            df_historico_cliente['Valor Cashback'] = pd.to_numeric(df_historico_cliente['Valor Cashback'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
+            
+            # Reorganiza as colunas para melhor visualização
+            colunas_display = ['Data', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
+            
+            st.dataframe(
+                df_historico_cliente[colunas_display].sort_values(by='Data', ascending=False),
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.info(f"Nenhum lançamento encontrado para {cliente_para_historico}.")
 
 
 def render_cadastro():
