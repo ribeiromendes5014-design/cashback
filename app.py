@@ -281,7 +281,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
     salvar_dados()  
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para {cliente_nome}. Cashback de R$ {valor_cashback:.2f} adicionado.")
 
-    # 2. Lógica de Envio para o Telegram (NOVO CÓDIGO)
+    # 2. Lógica de Envio para o Telegram (AJUSTADO PARA FUSO HORÁRIO BRASIL)
     if TELEGRAM_ENABLED:
         
         # Filtra SÓ as vendas (incluindo a atual)
@@ -301,11 +301,15 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
             st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'
         ].iloc[0]
         
-        # Formatação de valores e datas
+        # 🟢 CORREÇÃO DO FUSO HORÁRIO BRASIL (São Paulo)
+        fuso_horario_brasil = pytz.timezone('America/Sao_Paulo')
+        agora_brasil = datetime.now(fuso_horario_brasil)
+        data_hora_lancamento = agora_brasil.strftime('%d/%m/%Y às %H:%M')
+        
+        # Formatação de valores (R$ 1.000,00)
         cashback_ganho_str = f"R$ {valor_cashback:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         saldo_atual_str = f"R$ {saldo_atualizado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         total_compras_str = f"R$ {total_compras:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        data_hora_lancamento = date.today().strftime('%d/%m/%Y às %H:%M')
         
         # Monta a mensagem final exatamente no formato solicitado, usando Markdown para negrito
         mensagem_telegram = (
@@ -316,7 +320,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
             f"=================================\n\n"
             f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS NO DELIVERY*\n"
             f"- Máximo de resgate Cashback: *50.00% sobre o valor do pedido.*\n"
-            f"- Ter no mínimo *R$ 20,00* de saldo em conta. \n" # Mantenho R$ 20,00 da sua regra original no código Python
+            f"- Ter no mínimo *R$ 20,00* de saldo em conta. \n" 
             f" \n"
             f"🧑‍💻 *CONSULTE SEU SALDO CONOSCO*\n"
             f"💬 *CHAME A loja Doce&Bella NO ZAP*\n\n"
@@ -885,4 +889,5 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
