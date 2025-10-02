@@ -11,7 +11,7 @@ CASHBACK_PERCENTUAL = 0.03
 
 # Determina o modo de persistência (GitHub se o token estiver em secrets)
 # O Streamlit Community Cloud exige o uso de st.secrets para acessar o token.
-GITHUB_CONFIG = st.secrets.get("github")
+GITHUB_CONFIG = st.secrets.get("connections", {}).get("github", {})
 PERSISTENCE_MODE = "GITHUB" if GITHUB_CONFIG and GITHUB_CONFIG.get("token") else "LOCAL"
 
 # --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
@@ -516,4 +516,5 @@ with tab3:
             st.info("Nenhum lançamento encontrado com os filtros selecionados.")
     else:
         st.info("Nenhum lançamento registrado no histórico.")
+
 
