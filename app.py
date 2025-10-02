@@ -144,18 +144,18 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
         return False
 
-# --- Funções de Carregamento/Salvamento (CORRIGIDO) ---
+# --- Funções de Carregamento/Salvamento (CORRIGIDO PARA CACHE) ---
 
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
     
-    # 🟢 CORREÇÃO 1: Limpa o cache para forçar a releitura dos CSVs.
+    # 🟢 CORREÇÃO: Limpamos o cache e, mais importante, incrementamos a chave de versão.
+    # Esta chave força a reexecução do carregar_dados() no próximo rerun.
     st.cache_data.clear() 
 
-    # 🟢 CORREÇÃO 2: Incrementa a chave de estado para invalidar o cache pela assinatura da função.
     if 'data_version' not in st.session_state:
         st.session_state.data_version = 0
-    st.session_state.data_version += 1
+    st.session_state.data_version += 1 # Garante que o argumento mude para o cache invalidar
 
     if PERSISTENCE_MODE == "GITHUB":
         salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
@@ -186,8 +186,11 @@ def carregar_dados_do_csv(file_path, df_columns):
     return df[df_columns]
 
 @st.cache_data(show_spinner="Carregando dados...")
-def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
+def carregar_dados(data_version_key): # <-- ESTE ARGUMENTO É A CHAVE DE INVALIDAÇÃO
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
+    
+    # st.session_state não deve ser usada aqui se o objetivo é retornar o DF
+    # no entanto, como o seu código armazena os DFs diretamente no state, mantemos a estrutura
     
     st.session_state.clientes = carregar_dados_do_csv(
         CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível']
@@ -197,7 +200,7 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
         LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
     )
     
-    # Adiciona a inicialização de DF vazio para evitar erro no primeiro acesso
+    # ... o resto da inicialização continua aqui ...
     if 'clientes' not in st.session_state:
         st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
     if 'lancamentos' not in st.session_state:
@@ -255,7 +258,7 @@ def excluir_cliente(nome_cliente):
         st.session_state.lancamentos['Cliente'] != nome_cliente
     ].reset_index(drop=True)
     
-    # 2. Salva no GitHub e limpa o cache
+    # 2. Salva no GitHub e limpa o cache (incluindo o incremento da chave de versão)
     salvar_dados()
     
     # 3. CORREÇÃO: Remove o estado de exclusão e edição para forçar a atualização visual
@@ -265,7 +268,7 @@ def excluir_cliente(nome_cliente):
         del st.session_state.editing_client
     
     st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
-    st.rerun() # Força a reexecução, lendo o novo CSV do GitHub
+    st.rerun() # Força a reexecução, que usará a nova 'data_version' para recarregar do GitHub
 
 
 def cadastrar_cliente(nome, apelido, telefone):
@@ -942,6 +945,7 @@ if 'data_version' not in st.session_state:
 
 # 3. Carregamento: Chamamos a função carregar_dados. O cache é limpo em salvar_dados()
 # o que garante que o carregamento do GitHub ocorra após cada alteração.
+# A chave de versão (st.session_state.data_version) é o argumento que força a reexecução.
 carregar_dados(st.session_state.data_version)
 
 # Renderiza o cabeçalho customizado no topo da página
