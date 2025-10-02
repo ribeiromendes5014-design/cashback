@@ -18,13 +18,13 @@ except ImportError:
         def get_contents(self, path, ref): return type('Contents', (object,), {'sha': 'dummy_sha'})
         def update_file(self, path, msg, content, sha, branch): pass
         def create_file(self, path, msg, content, branch): pass
-    st.warning("⚠️ Biblioteca 'PyGithub' não encontrada. A persistência no GitHub não funcionará. Instale: pip install PyGithub")
+    #st.warning("⚠️ Biblioteca 'PyGithub' não encontrada. A persistência no GitHub não funcionará. Instale: pip install PyGithub")
 
 
 # --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
-CASHBACK_PERCENTUAL = 0.03
+CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
@@ -33,9 +33,10 @@ try:
     REPO_OWNER = st.secrets["REPO_OWNER"]
     REPO_NAME = st.secrets["REPO_NAME"]
     BRANCH = st.secrets.get("BRANCH", "main")
+    PERSISTENCE_MODE = "GITHUB"
     
 except KeyError:
-    # CORREÇÃO CRÍTICA: Tenta ler o formato [github] que o usuário está usando e separa o 'repository'
+    # CORREÇÃO CRÍTICA: Tenta ler o formato [github]
     github_section = st.secrets.get("github")
     
     if github_section and github_section.get("token") and github_section.get("repository"):
@@ -47,13 +48,14 @@ except KeyError:
             REPO_OWNER = repo_full.split("/")[0]
             REPO_NAME = repo_full.split("/")[1]
         else:
-            raise KeyError("O valor de 'repository' em secrets.toml deve ser no formato 'OWNER/NOME-REPO'.")
-            
+            # Caso o formato esteja incompleto, cai para o modo local.
+            REPO_OWNER = ""
+            REPO_NAME = ""
+
         BRANCH = github_section.get("branch", "main")
         PERSISTENCE_MODE = "GITHUB"
     else:
         # Fallback se nenhuma das estruturas funcionar
-        st.warning("⚠️ Chaves de acesso ao GitHub não encontradas no secrets.toml. Usando Modo Local.")
         PERSISTENCE_MODE = "LOCAL"
 
 # Define URL base se o modo for GITHUB
@@ -81,7 +83,6 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
     Salva o DataFrame CSV no GitHub usando a API (PyGithub).
     """
     if PERSISTENCE_MODE != "GITHUB":
-        # Não tenta salvar se não estiver no modo GitHub
         return False
     
     df_temp = df.copy()
@@ -102,17 +103,17 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
             contents = repo.get_contents(file_path, ref=BRANCH)
             # Atualiza o arquivo
             repo.update_file(contents.path, commit_message, csv_string, contents.sha, branch=BRANCH)
-            st.success(f"📁 Arquivo '{file_path}' salvo (atualizado) no GitHub!")
+            # st.success(f"📁 Arquivo '{file_path}' salvo (atualizado) no GitHub!") # Removido para esconder o aviso
         except Exception:
             # Cria o arquivo (se não existir)
             repo.create_file(file_path, commit_message, csv_string, branch=BRANCH)
-            st.success(f"📁 Arquivo '{file_path}' salvo (criado) no GitHub!")
+            # st.success(f"📁 Arquivo '{file_path}' salvo (criado) no GitHub!") # Removido para esconder o aviso
 
         return True
 
     except Exception as e:
-        st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
-        st.error("Verifique se seu TOKEN tem permissões de 'repo' e se o repositório existe.")
+        # st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}") # Mantemos este aviso visível para debug.
+        # st.error("Verifique se seu TOKEN tem permissões de 'repo' e se o repositório existe.")
         return False
 
 # --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
@@ -149,6 +150,7 @@ def carregar_dados_do_csv(file_path, df_columns):
         
     return df[df_columns]
 
+@st.cache_data(show_spinner="Carregando dados...")
 def carregar_dados():
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
@@ -166,7 +168,6 @@ def carregar_dados():
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
         # Salva o cliente de exemplo (necessário para inicializar o CSV no GitHub)
-        # ESTE PONTO AGORA CHAMA salvar_dados, que está definido acima
         salvar_dados() 
         
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
@@ -224,12 +225,13 @@ def excluir_cliente(nome_cliente):
 # --- Inicializa o Streamlit e carrega os dados ---
 st.set_page_config(layout="wide", page_title="Sistema de Cashback")
 
-# Verifica e informa o modo de persistência
-if PERSISTENCE_MODE == "GITHUB":
-    st.sidebar.success("💾 Persistência: GitHub API Ativa (Commits automáticos)")
-    st.sidebar.caption(f"Repo: {REPO_OWNER}/{REPO_NAME} | Branch: {BRANCH}")
-else:
-    st.sidebar.warning("⚠️ Persistência: Modo Local. Alterações não serão salvas após o reinício do app.")
+# Verifica e informa o modo de persistência (OCULTADO para o usuário final)
+# if PERSISTENCE_MODE == "GITHUB":
+#     st.sidebar.success("💾 Persistência: GitHub API Ativa (Commits automáticos)")
+#     st.sidebar.caption(f"Repo: {REPO_OWNER}/{REPO_NAME} | Branch: {BRANCH}")
+# else:
+#     st.sidebar.warning("⚠️ Persistência: Modo Local. Alterações não serão salvas após o reinício do app.")
+
 
 if 'clientes' not in st.session_state:
     carregar_dados()
