@@ -182,9 +182,6 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
 
 # --- Funções de Carregamento/Salvamento ---
 
-# CORREÇÃO: Removida a primeira definição duplicada e incorreta de salvar_dados.
-# Manter apenas a lógica de salvamento abaixo.
-
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
     
@@ -254,7 +251,10 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     ]
     global colunas_esperadas # Define a variável global para uso em carregar_dados_do_csv
     colunas_esperadas = CLIENTES_COLS
-    st.session_state.clientes = carregar_dados_do_csv(CLIENTES_CSV, CLIENTES_COLS)
+    
+    # CORREÇÃO: Removemos a inicialização "Cliente Exemplo" para depender apenas do CSV
+    df_clientes = carregar_dados_do_csv(CLIENTES_CSV, CLIENTES_COLS)
+    st.session_state.clientes = df_clientes
     
     # 2. LANÇAMENTOS: Colunas
     LANÇAMENTOS_COLS = ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback', 'Venda Turbo']
@@ -267,11 +267,7 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     st.session_state.produtos_turbo = carregar_dados_do_csv(PRODUTOS_TURBO_CSV, PRODUTOS_TURBO_COLS)
 
     
-    # --- Inicialização e Tipagem Clientes (CORRIGIDA) ---
-    if 'clientes' not in st.session_state or st.session_state.clientes.empty:
-        st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS)
-        st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00, 0.00, 'Prata', '', False]
-        
+    # --- Tipagem Clientes ---
     # FORÇA a conversão de string para o tipo correto
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(
         st.session_state.clientes['Cashback Disponível'], errors='coerce'
@@ -292,9 +288,6 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
         st.session_state.lancamentos['Venda Turbo'] = st.session_state.lancamentos['Venda Turbo'].astype(str).replace({'True': 'Sim', 'False': 'Não', '': 'Não'}).fillna('Não')
 
     # --- Tipagem Produtos Turbo ---
-    if 'produtos_turbo' not in st.session_state:
-        st.session_state.produtos_turbo = pd.DataFrame(columns=PRODUTOS_TURBO_COLS)
-        
     if not st.session_state.produtos_turbo.empty:
         st.session_state.produtos_turbo['Data Início'] = pd.to_datetime(st.session_state.produtos_turbo['Data Início'], errors='coerce').dt.date
         st.session_state.produtos_turbo['Data Fim'] = pd.to_datetime(st.session_state.produtos_turbo['Data Fim'], errors='coerce').dt.date
@@ -1418,13 +1411,9 @@ CLIENTES_COLS_FULL = ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Dispo
 LANÇAMENTOS_COLS_FULL = ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback', 'Venda Turbo'] 
 PRODUTOS_TURBO_COLS_FULL = ['Nome Produto', 'Data Início', 'Data Fim', 'Ativo'] 
 
-if 'clientes' not in st.session_state:
-    st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS_FULL)
-if 'lancamentos' not in st.session_state:
-    st.session_state.lancamentos = pd.DataFrame(columns=LANÇAMENTOS_COLS_FULL)
-if 'produtos_turbo' not in st.session_state:
-    st.session_state.produtos_turbo = pd.DataFrame(columns=PRODUTOS_TURBO_COLS_FULL)
-    
+# CORREÇÃO: Removemos a inicialização de DF vazios aqui, pois carregar_dados é a fonte única.
+# Adicionamos apenas as variáveis de estado de controle.
+
 # 2. Garante que as variáveis de estado de edição e deleção existam
 if 'editing_client' not in st.session_state:
     st.session_state.editing_client = False
@@ -1440,6 +1429,7 @@ if 'data_version' not in st.session_state:
 
 
 # 3. Carregamento: Chamamos a função carregar_dados. O cache é limpo em salvar_dados()
+# A função carregar_dados() é responsável por *sempre* popular o st.session_state
 carregar_dados(st.session_state.data_version)
 
 # Renderiza o cabeçalho customizado no topo da página
