@@ -7,7 +7,7 @@ import requests
 from io import StringIO
 import io, os
 import base64
-import pytz 
+import pytz  # Adicionado para o fuso horário correto
 
 # Tenta importar PyGithub para persistência.
 try:
@@ -65,10 +65,12 @@ if PERSISTENCE_MODE == "GITHUB":
     URL_BASE_REPOS = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/"
 
 
-# --- Configuração e Função do Telegram (AJUSTADO) ---
+# --- Configuração e Função do Telegram ---
 try:
     TELEGRAM_BOT_ID = st.secrets["telegram"]["BOT_ID"]
     TELEGRAM_CHAT_ID = st.secrets["telegram"]["CHAT_ID"]
+    # Adicionando o ID do Tópico/Thread (se existir)
+    TELEGRAM_THREAD_ID = st.secrets["telegram"].get("MESSAGE_THREAD_ID") 
     TELEGRAM_ENABLED = True
 except KeyError:
     TELEGRAM_ENABLED = False
@@ -78,21 +80,21 @@ def enviar_mensagem_telegram(mensagem: str):
     if not TELEGRAM_ENABLED:
         return
 
-    # Utiliza as variáveis carregadas do st.secrets
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_ID}/sendMessage"
     
-    # Usando 'Markdown' para formatação (negrito, itálico)
     payload = {
         'chat_id': TELEGRAM_CHAT_ID,
         'text': mensagem,
         'parse_mode': 'Markdown' 
     }
+    
+    # Adiciona o ID do Tópico se configurado
+    if TELEGRAM_THREAD_ID:
+        payload['message_thread_id'] = TELEGRAM_THREAD_ID
 
     try:
-        # Não precisa do 'st.toast' aqui; o sucesso da venda já foi avisado.
         requests.post(url, data=payload, timeout=5)
     except requests.exceptions.RequestException as e:
-        # Se a notificação falhar, apenas registra o erro e continua a aplicação.
         print(f"Erro ao enviar para o Telegram: {e}") 
         pass 
 
@@ -142,10 +144,14 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
         return False
 
-# --- Funções de Carregamento/Salvamento ---
+# --- Funções de Carregamento/Salvamento (CORRIGIDO) ---
 
 def salvar_dados():
-    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
+    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
+    
+    # 🟢 CORREÇÃO CRÍTICA: Limpa o cache para forçar a releitura dos CSVs na próxima execução.
+    st.cache_data.clear() 
+
     if PERSISTENCE_MODE == "GITHUB":
         salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
         salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
@@ -194,8 +200,9 @@ def carregar_dados():
 
 
     if st.session_state.clientes.empty:
+        # Cria um cliente de exemplo se o DF estiver vazio
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        salvar_dados()  
+        salvar_dados()  # Salva para criar os arquivos iniciais no GitHub/Local
         
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
 
@@ -292,7 +299,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
             (st.session_state.lancamentos['Tipo'] == 'Venda')
         ].copy()
         
-        # 🟢 CORREÇÃO: Pega o NÚMERO TOTAL DE VENDAS
+        # Pega o NÚMERO TOTAL DE VENDAS
         numero_total_vendas = len(vendas_do_cliente)
         
         # Obtém o saldo atualizado
@@ -314,7 +321,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
             f"Olá *{cliente_nome}*, aqui é o programa de fidelidade da loja Doce&Bella\n\n"
             f"Você ganhou *{cashback_ganho_str}* em créditos CASHBACK.\n\n"
             f"💖 Seu saldo em *{data_hora_lancamento}* é de *{saldo_atual_str}*.\n"
-            f"Total de compras realizadas: *{numero_total_vendas}*\n\n" # <--- LINHA AJUSTADA
+            f"Total de compras realizadas: *{numero_total_vendas}*\n\n"
             f"=================================\n\n"
             f"🟩 *REGRAS PARA RESGATAR SEUS CRÉDITOS Na loja*\n"
             f"- Máximo de resgate Cashback: *50.00% sobre o valor do pedido.*\n"
@@ -365,7 +372,7 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     salvar_dados()  
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
 
-    # --- 3. Lógica de Envio para o Telegram (CORRIGIDA) ---
+    # --- 3. Lógica de Envio para o Telegram ---
     if TELEGRAM_ENABLED:
         
         # --- Fuso Horário Brasil ---
@@ -429,7 +436,7 @@ st.markdown("""
     /* 4. Estilo dos botões/abas de Navegação (dentro do header) */
     .nav-button-group {
         display: flex;
-        gap: 0; 
+        gap: 0;  
         align-items: flex-end; /* Alinha os botões na base da barra */
     }
     
@@ -441,7 +448,7 @@ st.markdown("""
         min-width: 150px;
         height: 45px; /* Altura do botão */
         font-weight: bold;
-        color: #E91E63; 
+        color: #E91E63;  
         border: 1px solid #ddd;
         border-bottom: none;
     }
@@ -464,12 +471,12 @@ st.markdown("""
     .logo-container {
         padding: 10px 20px;
         /* CORREÇÃO: Removendo o fundo branco para que o PNG transparente combine com o fundo da página */
-        background-color: transparent; 
+        background-color: transparent;  
     }
     
     /* Ajuste de cor do st.metric */
     div[data-testid="stMetricValue"] {
-        color: #E91E63 !important; 
+        color: #E91E63 !important;  
     }
 
     </style>
@@ -490,8 +497,6 @@ def render_lancamento():
         st.subheader("Nova Venda (Cashback de 3%)")
         
         # 1. MOVIDO PARA FORA DO FORM: Valor da Venda (para cálculo em tempo real)
-        # O widget number_input fora do form atualiza a session_state a cada interação, 
-        # forçando o rerun e o recálculo do cashback.
         valor_venda = st.number_input("Valor da Venda (R$):", min_value=0.00, step=50.0, format="%.2f", key='valor_venda')
         
         # Inicializa o estado se for o primeiro acesso
@@ -863,8 +868,6 @@ def render_header():
                 is_active = st.session_state.pagina_atual == nome
                 
                 # Usa uma classe CSS para o estado ativo
-                # O Streamlit substitui a classe, então a injeção JS/HTML é necessária para manter o estilo
-                
                 if cols_botoes[i].button(
                     nome,  
                     key=f"nav_{nome}",  
@@ -901,17 +904,14 @@ if 'editing_client' not in st.session_state:
     st.session_state.editing_client = False
 if 'deleting_client' not in st.session_state:
     st.session_state.deleting_client = False
-if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = False
 # Garante que o valor da venda para cálculo instantâneo esteja pronto
 if 'valor_venda' not in st.session_state:
     st.session_state.valor_venda = 0.00
 
 
-# 3. Carregamento: Só chama carregar_dados() se os dados ainda não foram carregados na sessão.
-if not st.session_state.data_loaded:
-    carregar_dados()
-    st.session_state.data_loaded = True
+# 3. Carregamento: Chamamos a função carregar_dados. O cache é limpo em salvar_dados()
+# o que garante que o carregamento do GitHub ocorra após cada alteração.
+carregar_dados()
 
 # Renderiza o cabeçalho customizado no topo da página
 render_header()
@@ -920,9 +920,3 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
-
-
-
-
-
