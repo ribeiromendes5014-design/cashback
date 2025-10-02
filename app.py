@@ -1,59 +1,59 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 from datetime import date
-import os
-import io # Necessário para ler/escrever o CSV via conexão do GitHub
 import requests
 from io import StringIO
+import io, os
 import base64
 
 # Tenta importar PyGithub para persistência.
 try:
     from github import Github
 except ImportError:
-    # Cria uma classe dummy se PyGithub não estiver instalado (apenas para evitar crash local)
+    # Classe dummy para evitar crash se PyGithub não estiver instalado
     class Github:
         def __init__(self, token): pass
         def get_repo(self, repo_name): return self
         def get_contents(self, path, ref): return type('Contents', (object,), {'sha': 'dummy_sha'})
         def update_file(self, path, msg, content, sha, branch): pass
         def create_file(self, path, msg, content, branch): pass
-    #st.warning("⚠️ Biblioteca 'PyGithub' não encontrada. A persistência no GitHub não funcionará. Instale: pip install PyGithub")
-
 
 # --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03 # 3% do valor da venda
 
+# Configuração do logo para o novo layout
+LOGO_DOCEBELLA_URL = "https://i.ibb.co/60V022S/Logo-Doce-Bella-Cosm-tico.png" # Novo link para o logo
+
 # --- Configuração de Persistência (Puxa do st.secrets) ---
 try:
-    # Tenta ler o formato mais robusto (direto na raiz)
+    # 1. Tenta ler o formato PyGithub (separa OWNER/NAME)
     TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_OWNER = st.secrets["REPO_OWNER"]
     REPO_NAME = st.secrets["REPO_NAME"]
     BRANCH = st.secrets.get("BRANCH", "main")
     PERSISTENCE_MODE = "GITHUB"
-    
 except KeyError:
-    # CORREÇÃO CRÍTICA: Tenta ler o formato [github]
+    # 2. Tenta ler o formato [github] (repository completo)
     github_section = st.secrets.get("github")
     
     if github_section and github_section.get("token") and github_section.get("repository"):
         TOKEN = github_section["token"]
-        
-        # O valor 'ribeiromendes5014-design/cashback' é dividido
         repo_full = github_section["repository"]
         if "/" in repo_full:
             REPO_OWNER = repo_full.split("/")[0]
             REPO_NAME = repo_full.split("/")[1]
         else:
-            # Caso o formato esteja incompleto, cai para o modo local.
             REPO_OWNER = ""
             REPO_NAME = ""
-
         BRANCH = github_section.get("branch", "main")
-        PERSISTENCE_MODE = "GITHUB"
+        
+        if REPO_OWNER and REPO_NAME:
+            PERSISTENCE_MODE = "GITHUB"
+        else:
+            PERSISTENCE_MODE = "LOCAL"
     else:
         # Fallback se nenhuma das estruturas funcionar
         PERSISTENCE_MODE = "LOCAL"
@@ -74,20 +74,16 @@ def load_csv_github(url: str) -> pd.DataFrame | None:
         if df.empty or len(df.columns) < 2:
             return None
         return df
-    except Exception as e:
-        # print(f"Erro ao carregar {url}: {e}")
+    except Exception:
         return None
 
 def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str):
-    """
-    Salva o DataFrame CSV no GitHub usando a API (PyGithub).
-    """
+    """Salva o DataFrame CSV no GitHub usando a API (PyGithub)."""
     if PERSISTENCE_MODE != "GITHUB":
         return False
     
     df_temp = df.copy()
     
-    # 1. Prepara DataFrame: Garante que as datas sejam strings
     if 'Data' in df_temp.columns:
         df_temp['Data'] = pd.to_datetime(df_temp['Data'], errors='coerce').apply(
             lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else ''
@@ -99,26 +95,20 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
         csv_string = df_temp.to_csv(index=False, encoding="utf-8-sig")
 
         try:
-            # Tenta obter o SHA do conteúdo atual (necessário para update)
             contents = repo.get_contents(file_path, ref=BRANCH)
-            # Atualiza o arquivo
             repo.update_file(contents.path, commit_message, csv_string, contents.sha, branch=BRANCH)
-            # st.success(f"📁 Arquivo '{file_path}' salvo (atualizado) no GitHub!") # Removido para esconder o aviso
         except Exception:
-            # Cria o arquivo (se não existir)
             repo.create_file(file_path, commit_message, csv_string, branch=BRANCH)
-            # st.success(f"📁 Arquivo '{file_path}' salvo (criado) no GitHub!") # Removido para esconder o aviso
 
         return True
 
     except Exception as e:
-        # st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}") # Mantemos este aviso visível para debug.
-        # st.error("Verifique se seu TOKEN tem permissões de 'repo' e se o repositório existe.")
+        st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
         return False
 
-# --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
+# --- Funções de Carregamento/Salvamento ---
 
-# Função salva-dados movida para cima para ser acessível na carregar_dados
+# Função salva-dados deve estar no topo para uso em carregar_dados
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
     if PERSISTENCE_MODE == "GITHUB":
@@ -130,7 +120,7 @@ def salvar_dados():
         
 def carregar_dados_do_csv(file_path, df_columns):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
-    df = pd.DataFrame(columns=df_columns) # DF vazio padrão
+    df = pd.DataFrame(columns=df_columns) 
     
     if PERSISTENCE_MODE == "GITHUB":
         url_raw = f"{URL_BASE_REPOS}{file_path}"
@@ -138,13 +128,12 @@ def carregar_dados_do_csv(file_path, df_columns):
         if df_carregado is not None:
             df = df_carregado
         
-    elif os.path.exists(file_path): # Modo Local
+    elif os.path.exists(file_path): 
         try: 
             df = pd.read_csv(file_path)
         except pd.errors.EmptyDataError:
             pass
             
-    # Garante as colunas e tratamento de tipos
     for col in df_columns:
         if col not in df.columns: df[col] = "" 
         
@@ -154,30 +143,25 @@ def carregar_dados_do_csv(file_path, df_columns):
 def carregar_dados():
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    # Carrega Clientes
     st.session_state.clientes = carregar_dados_do_csv(
         CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível']
     )
     
-    # Carrega Lançamentos
     st.session_state.lancamentos = carregar_dados_do_csv(
         LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
     )
     
-    # Inicialização Pós-Carga: Adiciona cliente exemplo se vazio e garante tipos
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        # Salva o cliente de exemplo (necessário para inicializar o CSV no GitHub)
         salvar_dados() 
         
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
 
     if not st.session_state.lancamentos.empty:
-        # Garante que a coluna 'Data' seja do tipo date para os filtros
         st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
     
 
-# --- Funções de Edição e Exclusão (Chamam salvar_dados()) ---
+# --- Funções de Manipulação de Clientes e Transações ---
 
 def editar_cliente(nome_original, nome_novo, apelido, telefone):
     """Localiza o cliente pelo nome original, atualiza os dados e salva."""
@@ -222,25 +206,6 @@ def excluir_cliente(nome_cliente):
     st.rerun()
 
 
-# --- Inicializa o Streamlit e carrega os dados ---
-st.set_page_config(layout="wide", page_title="Sistema de Cashback")
-
-# Verifica e informa o modo de persistência (OCULTADO para o usuário final)
-# if PERSISTENCE_MODE == "GITHUB":
-#     st.sidebar.success("💾 Persistência: GitHub API Ativa (Commits automáticos)")
-#     st.sidebar.caption(f"Repo: {REPO_OWNER}/{REPO_NAME} | Branch: {BRANCH}")
-# else:
-#     st.sidebar.warning("⚠️ Persistência: Modo Local. Alterações não serão salvas após o reinício do app.")
-
-
-if 'clientes' not in st.session_state:
-    carregar_dados()
-if 'editing_client' not in st.session_state:
-    st.session_state.editing_client = False
-if 'deleting_client' not in st.session_state:
-    st.session_state.deleting_client = False
-
-
 def cadastrar_cliente(nome, apelido, telefone):
     """Adiciona um novo cliente ao DataFrame de clientes e salva o CSV."""
     if nome in st.session_state.clientes['Nome'].values:
@@ -277,7 +242,6 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda):
 def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resgate, saldo_disponivel):
     """Processa o resgate de cashback."""
     
-    # 1. Validações
     max_resgate = valor_venda_atual * 0.50
     if valor_resgate < 20:
         st.error(f"Erro: O resgate mínimo é de R$ 20,00.")
@@ -289,10 +253,8 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
         st.error(f"Erro: Saldo de cashback insuficiente (Disponível: R$ {saldo_disponivel:.2f}).")
         return
         
-    # 2. Processa o resgate
     st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'] -= valor_resgate
     
-    # 3. Registra o lançamento
     novo_lancamento = pd.DataFrame({
         'Data': [data_resgate],
         'Cliente': [cliente_nome],
@@ -305,20 +267,98 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     salvar_dados() 
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
 
-# --- Abas do Aplicativo ---
 
-tab1, tab2, tab3 = st.tabs(["Lançamento (Venda/Resgate)", "Cadastro de Clientes", "Relatórios"])
+# ==============================================================================
+# ESTRUTURA E LAYOUT DO STREAMLIT
+# ==============================================================================
 
-# --------------------------
-# --- ABA 1: Lançamento ---
-# --------------------------
-with tab1:
+# Configuração da página
+st.set_page_config(
+    layout="wide", 
+    page_title="Doce&Bella | Gestão Cashback", 
+    page_icon="🌸"
+)
+
+# Adiciona CSS para o layout customizado (Doce&Bella style)
+st.markdown("""
+    <style>
+    /* 1. Oculta o menu padrão do Streamlit e o footer */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* 2. Estilo Global e Cor de Fundo do Header */
+    .stApp {
+        background-color: #f7f7f7; /* Fundo mais claro */
+    }
+    
+    /* 3. Container customizado do Header (cor Magenta da Loja) */
+    div.header-container {
+        padding: 0px 0 0px 0; /* Remove padding vertical */
+        background-color: #E91E63; /* Cor Magenta Forte */
+        color: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        position: relative;
+        z-index: 1000;
+    }
+    
+    /* 4. Estilo dos botões/abas de Navegação (dentro do header) */
+    .nav-button-group {
+        display: flex;
+        gap: 0; 
+        align-items: flex-end; /* Alinha os botões na base da barra */
+    }
+    
+    /* Estilo dos botões/abas individuais */
+    div[data-testid^="stHorizontalBlock"] button {
+        border-radius: 5px 5px 0 0;
+        margin-right: 5px;
+        transition: all 0.2s;
+        min-width: 150px;
+        height: 45px; /* Altura do botão */
+        font-weight: bold;
+        color: #E91E63; 
+        border: 1px solid #ddd;
+        border-bottom: none;
+    }
+
+    /* Estilo para botão INATIVO */
+    div[data-testid^="stHorizontalBlock"] button {
+        background-color: #f2f2f2;
+        color: #880E4F; /* Rosa Escuro */
+    }
+
+    /* Estilo para botão ATIVO */
+    div[data-testid^="stHorizontalBlock"] button.active-nav-button {
+        background-color: white !important;
+        border-color: #E91E63;
+        color: #E91E63 !important; /* Cor principal */
+        box-shadow: 0 -4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Ajuste para centralizar o logo */
+    .logo-container {
+        padding: 10px 20px;
+        background-color: white; /* Fundo branco para o logo */
+    }
+
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Definição das Páginas (Funções de renderização) ---
+
+def render_lancamento():
+    """Renderiza a página de Lançamento (Venda/Resgate) - Antiga Tab 1"""
+    
     st.header("Lançamento de Venda e Resgate de Cashback")
     st.markdown("---")
     
-    # Opção para Lançar Venda ou Resgatar
     operacao = st.radio("Selecione a Operação:", ["Lançar Nova Venda", "Resgatar Cashback"], key='op_selecionada')
 
+    # (CÓDIGO DA ABA 1 - Lançamento)
     if operacao == "Lançar Nova Venda":
         st.subheader("Nova Venda (Cashback de 3%)")
         
@@ -333,7 +373,6 @@ with tab1:
             
             valor_venda = st.number_input("Valor da Venda (R$):", min_value=0.01, step=50.0, format="%.2f", key='valor_venda')
             
-            # Cálculo automático de Cashback (3%)
             cashback_calculado = valor_venda * CASHBACK_PERCENTUAL
             st.metric(label="Cashback a Gerar (3%):", value=f"R$ {cashback_calculado:.2f}")
             
@@ -345,7 +384,7 @@ with tab1:
                 if cliente_selecionado == '':
                     st.error("Por favor, selecione ou digite o nome de uma cliente.")
                 elif cliente_selecionado not in st.session_state.clientes['Nome'].values:
-                    st.warning("Cliente não encontrado. Por favor, cadastre-o primeiro na aba 'Cadastro de Clientes'.")
+                    st.warning("Cliente não encontrado. Por favor, cadastre-o primeiro na seção 'Cadastro'.")
                 else:
                     lancar_venda(cliente_selecionado, valor_venda, cashback_calculado, data_venda)
 
@@ -386,7 +425,6 @@ with tab1:
 
             if cliente_resgate != '':
                 if cliente_resgate in st.session_state.clientes['Nome'].values:
-                    # Puxa o saldo atual do cliente selecionado (garante que seja o saldo mais recente)
                     saldo_atual = st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_resgate, 'Cashback Disponível'].iloc[0]
                     st.info(f"Saldo Disponível para {cliente_resgate}: R$ {saldo_atual:.2f}")
                     
@@ -405,13 +443,12 @@ with tab1:
                 elif valor_resgate <= 0:
                     st.error("O valor do resgate deve ser maior que zero.")
                 else:
-                    # Se o cliente for selecionado, o saldo_atual será puxado corretamente antes da validação.
                     resgatar_cashback(cliente_resgate, valor_resgate, valor_venda_resgate, data_resgate, saldo_atual)
 
-# --------------------------
-# --- ABA 2: Cadastro ---
-# --------------------------
-with tab2:
+
+def render_cadastro():
+    """Renderiza a página de Cadastro e Gestão de Clientes - Antiga Tab 2"""
+    
     st.header("Cadastro de Clientes e Gestão")
     
     # ------------------
@@ -521,10 +558,9 @@ with tab2:
     st.dataframe(st.session_state.clientes, hide_index=True, use_container_width=True)
 
 
-# --------------------------
-# --- ABA 3: Relatórios ---
-# --------------------------
-with tab3:
+def render_relatorios():
+    """Renderiza a página de Relatórios e Rankings - Antiga Tab 3"""
+    
     st.header("Relatórios e Rankings")
     st.markdown("---")
 
@@ -563,17 +599,14 @@ with tab3:
     df_historico = st.session_state.lancamentos.copy()
     
     if not df_historico.empty:
-        # Filtro por Data
         if data_selecionada:
             df_historico['Data'] = df_historico['Data'].astype(str)
             data_selecionada_str = str(data_selecionada)
             df_historico = df_historico[df_historico['Data'] == data_selecionada_str]
 
-        # Filtro por Tipo
         if tipo_selecionado != 'Todos':
             df_historico = df_historico[df_historico['Tipo'] == tipo_selecionado]
 
-        # Formata a coluna Valor Venda/Resgate e Valor Cashback
         if not df_historico.empty:
             df_historico['Valor Venda/Resgate'] = df_historico['Valor Venda/Resgate'].map('R$ {:.2f}'.format)
             df_historico['Valor Cashback'] = df_historico['Valor Cashback'].map('R$ {:.2f}'.format)
@@ -582,3 +615,123 @@ with tab3:
             st.info("Nenhum lançamento encontrado com os filtros selecionados.")
     else:
         st.info("Nenhum lançamento registrado no histórico.")
+
+def render_home():
+    """Página de boas-vindas e resumo geral."""
+    st.header("Seja Bem-Vinda ao Painel de Gestão de Cashback Doce&Bella!")
+    st.markdown("---")
+
+    total_clientes = len(st.session_state.clientes)
+    total_cashback_pendente = st.session_state.clientes['Cashback Disponível'].sum()
+    
+    # Filtra vendas e calcula o volume
+    vendas_df = st.session_state.lancamentos[st.session_state.lancamentos['Tipo'] == 'Venda']
+    total_vendas_mes = vendas_df[vendas_df['Data'].apply(lambda x: x.month == date.today().month if pd.notna(x) else False)]['Valor Venda/Resgate'].sum()
+
+    col1, col2, col3 = st.columns(3)
+    
+    col1.metric("Clientes Cadastrados", total_clientes)
+    col2.metric("Total de Cashback Devido", f"R$ {total_cashback_pendente:,.2f}")
+    col3.metric("Volume de Vendas (Mês Atual)", f"R$ {total_vendas_mes:,.2f}")
+
+    st.markdown("---")
+    st.markdown("### Próximos Passos Rápidos")
+    
+    col_nav1, col_nav2, col_nav3 = st.columns(3)
+    
+    if col_nav1.button("▶️ Lançar Nova Venda", use_container_width=True):
+        st.session_state.pagina_atual = "Lançamento"
+        st.rerun()
+    
+    if col_nav2.button("👥 Cadastrar Nova Cliente", use_container_width=True):
+        st.session_state.pagina_atual = "Cadastro"
+        st.rerun()
+
+    if col_nav3.button("📈 Ver Relatórios de Vendas", use_container_width=True):
+        st.session_state.pagina_atual = "Relatórios"
+        st.rerun()
+
+
+# --- Mapeamento das Páginas ---
+PAGINAS = {
+    "Home": render_home,
+    "Lançamento": render_lancamento,
+    "Cadastro": render_cadastro,
+    "Relatórios": render_relatorios
+}
+
+if "pagina_atual" not in st.session_state:
+    st.session_state.pagina_atual = "Home"
+
+
+# --- Renderiza o Header Customizado ---
+
+def render_header():
+    """Renderiza o header customizado com a navegação em botões."""
+    
+    col_logo, col_nav = st.columns([1, 4])
+    
+    with col_logo:
+        st.markdown(f'''
+            <div class="logo-container">
+                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 50px;">
+            </div>
+        ''', unsafe_allow_html=True)
+        
+    with col_nav:
+        # A barra rosa forte onde os botões se apoiam
+        st.markdown('<div style="height: 5px; background-color: #E91E63;"></div>', unsafe_allow_html=True) 
+        
+        # Container de botões (Horizontal)
+        cols_botoes = st.columns([1] * len(PAGINAS))
+        
+        paginas_ordenadas = ["Home", "Lançamento", "Cadastro", "Relatórios"]
+        
+        for i, nome in enumerate(paginas_ordenadas):
+            if nome in PAGINAS:
+                is_active = st.session_state.pagina_atual == nome
+                
+                # Usa uma classe CSS para o estado ativo
+                button_class = "active-nav-button" if is_active else ""
+                
+                if cols_botoes[i].button(
+                    nome, 
+                    key=f"nav_{nome}", 
+                    use_container_width=True, 
+                    help=f"Ir para {nome}"
+                ):
+                    st.session_state.pagina_atual = nome
+                    st.rerun()
+                
+                # Aplica a classe CSS injetando o JavaScript/HTML após o botão ser renderizado
+                if is_active:
+                    st.markdown(f"""
+                        <script>
+                            var button = window.parent.document.querySelector('button[kind="secondary"][data-testid^="stHorizontalBlock"]');
+                            if (button) {{
+                                button.classList.add('active-nav-button');
+                            }}
+                        </script>
+                    """, unsafe_allow_html=True)
+
+
+# --- EXECUÇÃO PRINCIPAL ---
+
+# Inicialização e Carregamento de Dados
+if 'clientes' not in st.session_state:
+    carregar_dados()
+
+# Renderiza o cabeçalho customizado no topo da página
+render_header()
+
+
+# Renderização do conteúdo da página selecionada
+st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
+PAGINAS[st.session_state.pagina_atual]()
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Garante que as variáveis de estado de edição estejam definidas
+if 'editing_client' not in st.session_state:
+    st.session_state.editing_client = False
+if 'deleting_client' not in st.session_state:
+    st.session_state.deleting_client = False
