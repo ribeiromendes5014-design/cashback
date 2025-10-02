@@ -286,7 +286,6 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
                     f"Agradecemos demais a sua indicação da {cliente_nome}! Ter você como nossa cliente e parceira nos enche de orgulho. ✨\n\n"
                     f"Graças à sua indicação, você acaba de ganhar *{bonus_str}* extras em seu Programa de Fidelidade Doce&Bella! Isso te ajuda a chegar ainda mais rápido ao próximo nível. 🚀\n\n"
                     f"Seu nível atual é: *{nivel_indicador}*.\n\n"
-                    "Resgate seus créditos na próxima compra e continue aproveitando as vantagens!\n\n"
                     "Até a próxima, com carinho,\n"
                     "Doce&Bella"
                 )
@@ -679,4 +678,5 @@ st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 st.info(f"Modo de Persistência: {PERSISTENCE_MODE}")
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
