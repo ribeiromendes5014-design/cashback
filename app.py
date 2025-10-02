@@ -201,6 +201,9 @@ def salvar_dados():
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
         st.session_state.produtos_turbo.to_csv(PRODUTOS_TURBO_CSV, index=False)
         
+# Variável global para auxiliar a função de carregamento a garantir todas as colunas
+colunas_esperadas = [] 
+
 def carregar_dados_do_csv(file_path, df_columns):
     """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
     df = pd.DataFrame(columns=df_columns)  
@@ -218,7 +221,7 @@ def carregar_dados_do_csv(file_path, df_columns):
             pass
             
     # Garante que todas as colunas existem e inicializa valores padrão
-    for col in colunas_esperadas: # Usa a lista de colunas externas
+    for col in df_columns:
         if col not in df.columns: 
             df[col] = "" # Inicia como string vazia
         
@@ -411,19 +414,24 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
     st.rerun()  
 
 def excluir_cliente(nome_cliente):
-    """Exclui o cliente e todas as suas transações, depois salva."""
+    """Exclui o cliente e todas as suas transações, salva no CSV e força recarregamento."""
     
+    # Remove do DataFrame de clientes
     st.session_state.clientes = st.session_state.clientes[
         st.session_state.clientes['Nome'] != nome_cliente
     ].reset_index(drop=True)
     
+    # Remove do DataFrame de lançamentos
     st.session_state.lancamentos = st.session_state.lancamentos[
         st.session_state.lancamentos['Cliente'] != nome_cliente
     ].reset_index(drop=True)
     
+    # CORREÇÃO: Força o salvamento dos DataFrames limpos no CSV antes do rerun
     salvar_dados()
+    
     st.session_state.deleting_client = False
     st.success(f"Cliente '{nome_cliente}' e todos os seus lançamentos foram excluídos.")
+    # Força o recarregamento, que agora lerá o CSV atualizado
     st.rerun()
 
 
