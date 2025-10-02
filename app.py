@@ -24,8 +24,8 @@ except ImportError:
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 PRODUTOS_TURBO_CSV = 'produtos_turbo.csv'
-BONUS_INDICACAO_PERCENTUAL = 0.05 # 5% para o indicador
-CASHBACK_INDICADO_PRIMEIRA_COMPRA = 0.08 # 8% para o indicado
+BONUS_INDICACAO_PERCENTUAL = 0.03 # 3% para o indicador
+CASHBACK_INDICADO_PRIMEIRA_COMPRA = 0.05 # 3% para o indicado
 
 # Configuração do logo para o novo layout
 LOGO_DOCEBELLA_URL = "https://i.ibb.co/fYCWBKTm/Logo-Doce-Bella-Cosm-tico.png" # Link do logo
@@ -679,3 +679,4 @@ st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 st.info(f"Modo de Persistência: {PERSISTENCE_MODE}")
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
