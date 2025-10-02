@@ -253,7 +253,6 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
     if 'clientes' not in st.session_state or st.session_state.clientes.empty:
         st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS)
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00, 0.00, 'Prata', '', False]
-        # Salva para criar os arquivos iniciais no GitHub/Local (Não salva agora para evitar loop, salva no final)
         
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
     st.session_state.clientes['Gasto Acumulado'] = pd.to_numeric(st.session_state.clientes['Gasto Acumulado'], errors='coerce').fillna(0.0)
@@ -995,6 +994,22 @@ def render_cadastro():
                 key='indicado_por',
                 index=0
             )
+            
+            # 🟢 MENSAGEM DE BENEFÍCIO DO INDICADOR (MELHORIA SOLICITADA)
+            bonus_pct = int(BONUS_INDICACAO_PERCENTUAL * 100)
+            cashback_indicado_pct = int(CASHBACK_INDICADO_PRIMEIRA_COMPRA * 100)
+            
+            if indicado_por:
+                st.success(
+                    f"**Bônus Indicação:** A cliente **{indicado_por}** receberá **{bonus_pct}%** do valor da primeira compra, creditado após o lançamento da venda desta nova cliente. "
+                    f"A nova cliente receberá **{cashback_indicado_pct}%** de cashback na primeira compra!"
+                )
+            else:
+                 st.info(
+                    f"A nova cliente receberá **{cashback_indicado_pct}%** de cashback na primeira compra! "
+                    f"Selecione a cliente indicadora acima para que ela receba o bônus de **{bonus_pct}%**."
+                )
+
 
         submitted_cadastro = st.form_submit_button("Cadastrar Cliente")
         
