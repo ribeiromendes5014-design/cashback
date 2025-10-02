@@ -704,7 +704,7 @@ def render_header():
     with col_logo:
         st.markdown(f'''
             <div class="logo-container">
-                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 120px;"> 
+                <img src="{LOGO_DOCEBELLA_URL}" alt="Doce&Bella Logo" style="height: 200px;"> 
             </div>
         ''', unsafe_allow_html=True)
         
@@ -774,4 +774,5 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
+
 
