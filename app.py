@@ -608,8 +608,8 @@ def render_relatorios():
             df_historico = df_historico[df_historico['Tipo'] == tipo_selecionado]
 
         if not df_historico.empty:
-            df_historico['Valor Venda/Resgate'] = df_historico['Valor Venda/Resgate'].map('R$ {:.2f}'.format)
-            df_historico['Valor Cashback'] = df_historico['Valor Cashback'].map('R$ {:.2f}'.format)
+            df_historico['Valor Venda/Resgate'] = pd.to_numeric(df_historico['Valor Venda/Resgate'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
+            df_historico['Valor Cashback'] = pd.to_numeric(df_historico['Valor Cashback'], errors='coerce').fillna(0).map('R$ {:.2f}'.format)
             st.dataframe(df_historico, hide_index=True, use_container_width=True)
         else:
             st.info("Nenhum lançamento encontrado com os filtros selecionados.")
@@ -738,8 +738,15 @@ def render_header():
 # --- EXECUÇÃO PRINCIPAL ---
 
 # Inicialização e Carregamento de Dados
+# 1. Inicializa o estado da sessão para evitar o erro 'AttributeError: 'st._SessionStateProxy' object has no attribute 'clientes''
 if 'clientes' not in st.session_state:
     carregar_dados()
+
+# 2. Garante que as variáveis de estado de edição e deleção existam
+if 'editing_client' not in st.session_state:
+    st.session_state.editing_client = False
+if 'deleting_client' not in st.session_state:
+    st.session_state.deleting_client = False
 
 # Renderiza o cabeçalho customizado no topo da página
 render_header()
@@ -749,11 +756,3 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
-# Garante que as variáveis de estado de edição estejam definidas
-if 'editing_client' not in st.session_state:
-    st.session_state.editing_client = False
-if 'deleting_client' not in st.session_state:
-    st.session_state.deleting_client = False
-
-
