@@ -182,35 +182,8 @@ def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str
 
 # --- Funções de Carregamento/Salvamento ---
 
-def salvar_dados():
-    """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub.
-    Limpa o cache e recarrega os dados atualizados na memória (session_state)."""
-    
-    # Limpa o cache para forçar a releitura dos CSVs
-    st.cache_data.clear() 
-
-    # Incrementa a chave de versão para forçar recarregamento
-    if 'data_version' not in st.session_state:
-        st.session_state.data_version = 0
-    st.session_state.data_version += 1
-
-    # Salva os dados
-    if PERSISTENCE_MODE == "GITHUB":
-        salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
-        salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
-        salvar_dados_no_github(st.session_state.produtos_turbo, PRODUTOS_TURBO_CSV, "AUTOSAVE: Atualizando produtos turbo.")
-    else:  # Modo LOCAL
-        st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
-        st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
-        st.session_state.produtos_turbo.to_csv(PRODUTOS_TURBO_CSV, index=False)
-
-    # ✅ Recarrega os DataFrames já salvos no session_state
-    carregar_dados(st.session_state.data_version)
-
-
-
-
-# --- Funções de Carregamento/Salvamento ---
+# CORREÇÃO: Removida a primeira definição duplicada e incorreta de salvar_dados.
+# Manter apenas a lógica de salvamento abaixo.
 
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub. Limpa o cache."""
@@ -271,10 +244,8 @@ def carregar_dados_do_csv(file_path, df_columns):
     return df[df_columns]
 
 @st.cache_data(show_spinner="Carregando dados...")
-def carregar_dados(data_version_key):  
-    """Força recarregamento sempre que data_version_key mudar."""
-    
-    _ = data_version_key  # <-- força o cache a depender da versão
+def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
+    """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
     # 1. CLIENTES: Colunas
     CLIENTES_COLS = [
@@ -569,6 +540,9 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     salvar_dados()  
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para **{cliente_nome}** ({novo_nivel}). Cashback de R$ {valor_cashback:.2f} adicionado.")
 
+    # CORREÇÃO: Adicionando st.rerun() para forçar o recarregamento dos dados
+    st.rerun()
+
     # 4. Lógica de Envio para o Telegram (MANTIDO)
     if TELEGRAM_ENABLED:
         
@@ -658,6 +632,9 @@ def resgatar_cashback(cliente_nome, valor_resgate, valor_venda_atual, data_resga
     
     salvar_dados()  
     st.success(f"Resgate de R$ {valor_resgate:.2f} realizado com sucesso para {cliente_nome}.")
+
+    # CORREÇÃO: Adicionando st.rerun() para forçar o recarregamento dos dados
+    st.rerun()
 
     # --- 3. Lógica de Envio para o Telegram (MANTIDA) ---
     if TELEGRAM_ENABLED:
@@ -1472,7 +1449,3 @@ render_header()
 st.markdown('<div style="padding-top: 20px;">', unsafe_allow_html=True)
 PAGINAS[st.session_state.pagina_atual]()
 st.markdown('</div>', unsafe_allow_html=True)
-
-
-
-
