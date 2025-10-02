@@ -3,118 +3,179 @@ import pandas as pd
 from datetime import date
 import os
 import io # Necessário para ler/escrever o CSV via conexão do GitHub
+import requests
+from io import StringIO
+import base64
+
+# Tenta importar PyGithub para persistência.
+try:
+    from github import Github
+except ImportError:
+    # Cria uma classe dummy se PyGithub não estiver instalado (apenas para evitar crash local)
+    class Github:
+        def __init__(self, token): pass
+        def get_repo(self, repo_name): return self
+        def get_contents(self, path, ref): return type('Contents', (object,), {'sha': 'dummy_sha'})
+        def update_file(self, path, msg, content, sha, branch): pass
+        def create_file(self, path, msg, content, branch): pass
+    st.warning("⚠️ Biblioteca 'PyGithub' não encontrada. A persistência no GitHub não funcionará. Instale: pip install PyGithub")
+
 
 # --- Nomes dos arquivos CSV e Configuração ---
 CLIENTES_CSV = 'clientes.csv'
 LANÇAMENTOS_CSV = 'lancamentos.csv'
 CASHBACK_PERCENTUAL = 0.03
 
-# CORREÇÃO: Tenta obter a configuração do GitHub de ambos os formatos: [github] ou [connections.github]
-# Isto garante que a configuração seja lida corretamente, dado que o secrets.toml usa o formato [github]
-GITHUB_CONFIG = st.secrets.get("github") or st.secrets.get("connections", {}).get("github", {})
+# --- Configuração de Persistência (Puxa do st.secrets) ---
+try:
+    # O código agora espera estas variáveis no seu .streamlit/secrets.toml
+    TOKEN = st.secrets["GITHUB_TOKEN"]
+    REPO_OWNER = st.secrets["REPO_OWNER"]
+    REPO_NAME = st.secrets["REPO_NAME"]
+    BRANCH = st.secrets.get("BRANCH", "main")
+    
+    # URL base para leitura (raw content)
+    URL_BASE_REPOS = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/"
+    PERSISTENCE_MODE = "GITHUB"
+    
+except KeyError:
+    # Fallback para o modo LOCAL se o token não for encontrado
+    st.warning("⚠️ Chaves 'GITHUB_TOKEN', 'REPO_OWNER' ou 'REPO_NAME' faltando em secrets.toml. Usando Modo Local.")
+    PERSISTENCE_MODE = "LOCAL"
 
-# Verifica se o token foi lido com sucesso para definir o modo
-PERSISTENCE_MODE = "GITHUB" if GITHUB_CONFIG and GITHUB_CONFIG.get("token") else "LOCAL"
+# --- Funções de Persistência via GitHub API (PyGithub) ---
 
-# --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
-
-def carregar_dados_github(file_path, df_columns):
-    """Carrega dados usando a conexão GitHub Storage."""
+def load_csv_github(url: str) -> pd.DataFrame | None:
+    """Carrega um CSV do GitHub usando a URL raw."""
     try:
-        conn = st.connection("github", type="experimental_github_storage")
-        file_content = conn.read(file_path)
-        df = pd.read_csv(io.StringIO(file_content))
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        df = pd.read_csv(StringIO(response.text), dtype=str)
+        if df.empty or len(df.columns) < 2:
+            return None
         return df
     except Exception as e:
-        # Se o arquivo não for encontrado ou estiver vazio/malformado
-        st.warning(f"Não foi possível carregar '{file_path}' do GitHub. Usando DataFrame vazio/inicial. (Detalhe: {e})")
-        return pd.DataFrame(columns=df_columns)
+        # print(f"Erro ao carregar {url}: {e}")
+        return None
 
-def salvar_dados_github(file_path, df):
-    """Salva dados usando a conexão GitHub Storage (fazendo um commit)."""
-    try:
-        conn = st.connection("github", type="experimental_github_storage")
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-        conn.write(
-            file_path=file_path,
-            data=csv_buffer.getvalue(),
-            commit_message=f"AUTOSAVE CASHBACK: Atualizando {file_path}",
-            branch=GITHUB_CONFIG.get("branch", "main")
-        )
-        return True
-    except Exception as e:
-        st.error(f"ERRO CRÍTICO: Não foi possível salvar '{file_path}' no GitHub. Verifique as permissões do token. Detalhes: {e}")
+def salvar_dados_no_github(df: pd.DataFrame, file_path: str, commit_message: str):
+    """
+    Salva o DataFrame CSV no GitHub usando a API (PyGithub).
+    """
+    if PERSISTENCE_MODE != "GITHUB":
+        # Não tenta salvar se não estiver no modo GitHub
         return False
+    
+    df_temp = df.copy()
+    
+    # 1. Prepara DataFrame: Garante que as datas sejam strings
+    if 'Data' in df_temp.columns:
+        df_temp['Data'] = pd.to_datetime(df_temp['Data'], errors='coerce').apply(
+            lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else ''
+        )
+
+    try:
+        g = Github(TOKEN)
+        repo = g.get_repo(f"{REPO_OWNER}/{REPO_NAME}")
+        csv_string = df_temp.to_csv(index=False, encoding="utf-8-sig")
+
+        try:
+            # Tenta obter o SHA do conteúdo atual (necessário para update)
+            contents = repo.get_contents(file_path, ref=BRANCH)
+            # Atualiza o arquivo
+            repo.update_file(contents.path, commit_message, csv_string, contents.sha, branch=BRANCH)
+            st.success(f"📁 Arquivo '{file_path}' salvo (atualizado) no GitHub!")
+        except Exception:
+            # Cria o arquivo (se não existir)
+            repo.create_file(file_path, commit_message, csv_string, branch=BRANCH)
+            st.success(f"📁 Arquivo '{file_path}' salvo (criado) no GitHub!")
+
+        return True
+
+    except Exception as e:
+        st.error(f"❌ ERRO CRÍTICO ao salvar no GitHub ({file_path}): {e}")
+        st.error("Verifique se seu TOKEN tem permissões de 'repo' e se o repositório existe.")
+        return False
+
+# --- Funções de Carregamento/Salvamento (Suporte a GitHub e Local) ---
         
+def carregar_dados_do_csv(file_path, df_columns):
+    """Lógica para carregar CSV local ou do GitHub, retornando o DF."""
+    df = pd.DataFrame(columns=df_columns) # DF vazio padrão
+    
+    if PERSISTENCE_MODE == "GITHUB":
+        url_raw = f"{URL_BASE_REPOS}{file_path}"
+        df_carregado = load_csv_github(url_raw)
+        if df_carregado is not None:
+            df = df_carregado
+        
+    elif os.path.exists(file_path): # Modo Local
+        try: 
+            df = pd.read_csv(file_path)
+        except pd.errors.EmptyDataError:
+            pass
+            
+    # Garante as colunas e tratamento de tipos
+    for col in df_columns:
+        if col not in df.columns: df[col] = "" 
+        
+    return df[df_columns]
+
 def carregar_dados():
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
     
-    if PERSISTENCE_MODE == "GITHUB":
-        # Carrega Clientes do GitHub
-        st.session_state.clientes = carregar_dados_github(
-            CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível']
-        )
-        
-        # Carrega Lançamentos do GitHub
-        st.session_state.lancamentos = carregar_dados_github(
-            LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
-        )
-        
-    else: # Modo LOCAL (para desenvolvimento sem secrets)
-        if os.path.exists(CLIENTES_CSV):
-            try: st.session_state.clientes = pd.read_csv(CLIENTES_CSV)
-            except pd.errors.EmptyDataError: st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
-        else: st.session_state.clientes = pd.DataFrame(columns=['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível'])
-
-        if os.path.exists(LANÇAMENTOS_CSV):
-            try: st.session_state.lancamentos = pd.read_csv(LANÇAMENTOS_CSV)
-            except pd.errors.EmptyDataError: st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
-        else: st.session_state.lancamentos = pd.DataFrame(columns=['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback'])
-
-
+    # Carrega Clientes
+    st.session_state.clientes = carregar_dados_do_csv(
+        CLIENTES_CSV, ['Nome', 'Apelido/Descrição', 'Telefone', 'Cashback Disponível']
+    )
+    
+    # Carrega Lançamentos
+    st.session_state.lancamentos = carregar_dados_do_csv(
+        LANÇAMENTOS_CSV, ['Data', 'Cliente', 'Tipo', 'Valor Venda/Resgate', 'Valor Cashback']
+    )
+    
     # Inicialização Pós-Carga: Adiciona cliente exemplo se vazio e garante tipos
     if st.session_state.clientes.empty:
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00]
-        salvar_dados() # Salva o cliente de exemplo inicial
+        # Salva o cliente de exemplo (necessário para inicializar o CSV no GitHub)
+        salvar_dados() 
+        
+    st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(st.session_state.clientes['Cashback Disponível'], errors='coerce').fillna(0.0)
 
     if not st.session_state.lancamentos.empty:
-        st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data']).dt.date
+        # Garante que a coluna 'Data' seja do tipo date para os filtros
+        st.session_state.lancamentos['Data'] = pd.to_datetime(st.session_state.lancamentos['Data'], errors='coerce').dt.date
     
 
 def salvar_dados():
     """Salva os DataFrames de volta nos arquivos CSV, priorizando o GitHub."""
     if PERSISTENCE_MODE == "GITHUB":
-        salvar_dados_github(CLIENTES_CSV, st.session_state.clientes)
-        salvar_dados_github(LANÇAMENTOS_CSV, st.session_state.lancamentos)
+        salvar_dados_no_github(st.session_state.clientes, CLIENTES_CSV, "AUTOSAVE: Atualizando clientes e saldos.")
+        salvar_dados_no_github(st.session_state.lancamentos, LANÇAMENTOS_CSV, "AUTOSAVE: Atualizando histórico de lançamentos.")
     else: # Modo LOCAL
         st.session_state.clientes.to_csv(CLIENTES_CSV, index=False)
         st.session_state.lancamentos.to_csv(LANÇAMENTOS_CSV, index=False)
 
 
-# --- Funções de Edição e Exclusão ---
+# --- Funções de Edição e Exclusão (Chamam salvar_dados()) ---
 
 def editar_cliente(nome_original, nome_novo, apelido, telefone):
     """Localiza o cliente pelo nome original, atualiza os dados e salva."""
     
-    # 1. Encontra o índice
     idx = st.session_state.clientes[st.session_state.clientes['Nome'] == nome_original].index
     
     if idx.empty:
         st.error(f"Erro: Cliente '{nome_original}' não encontrado.")
         return
 
-    # 2. Verifica se o novo nome já existe (se for diferente do original)
     if nome_novo != nome_original and nome_novo in st.session_state.clientes['Nome'].values:
         st.error(f"Erro: O novo nome '{nome_novo}' já está em uso por outro cliente.")
         return
     
-    # 3. Atualiza os dados do cliente
     st.session_state.clientes.loc[idx, 'Nome'] = nome_novo
     st.session_state.clientes.loc[idx, 'Apelido/Descrição'] = apelido
     st.session_state.clientes.loc[idx, 'Telefone'] = telefone
     
-    # 4. Atualiza os lançamentos (se o nome mudou)
     if nome_novo != nome_original:
         st.session_state.lancamentos.loc[st.session_state.lancamentos['Cliente'] == nome_original, 'Cliente'] = nome_novo
     
@@ -127,12 +188,10 @@ def editar_cliente(nome_original, nome_novo, apelido, telefone):
 def excluir_cliente(nome_cliente):
     """Exclui o cliente e todas as suas transações, depois salva."""
     
-    # 1. Exclui o cliente do DataFrame de clientes
     st.session_state.clientes = st.session_state.clientes[
         st.session_state.clientes['Nome'] != nome_cliente
     ].reset_index(drop=True)
     
-    # 2. Exclui os lançamentos associados
     st.session_state.lancamentos = st.session_state.lancamentos[
         st.session_state.lancamentos['Cliente'] != nome_cliente
     ].reset_index(drop=True)
@@ -148,7 +207,8 @@ st.set_page_config(layout="wide", page_title="Sistema de Cashback")
 
 # Verifica e informa o modo de persistência
 if PERSISTENCE_MODE == "GITHUB":
-    st.sidebar.success("💾 Persistência: GitHub Storage Ativa (Salvamento automático no repositório)")
+    st.sidebar.success("💾 Persistência: GitHub API Ativa (Commits automáticos)")
+    st.sidebar.caption(f"Repo: {REPO_OWNER}/{REPO_NAME} | Branch: {BRANCH}")
 else:
     st.sidebar.warning("⚠️ Persistência: Modo Local. Alterações não serão salvas após o reinício do app.")
 
@@ -271,7 +331,6 @@ with tab1:
     elif operacao == "Resgatar Cashback":
         st.subheader("Resgate de Cashback")
         
-        # Filtra clientes com saldo positivo para resgate
         clientes_com_cashback = st.session_state.clientes[st.session_state.clientes['Cashback Disponível'] >= 20.00].copy()
         clientes_options = [''] + clientes_com_cashback['Nome'].tolist()
         
@@ -286,7 +345,6 @@ with tab1:
             
             saldo_atual = 0.00
             
-            # Campos de entrada
             valor_venda_resgate = st.number_input(
                 "Valor da Venda Atual (para cálculo do limite de 50%):", 
                 min_value=0.01, 
@@ -305,9 +363,9 @@ with tab1:
             
             data_resgate = st.date_input("Data do Resgate:", value=date.today(), key='data_resgate')
 
-            # Display de informações e avisos (fora do formulário)
             if cliente_resgate != '':
                 if cliente_resgate in st.session_state.clientes['Nome'].values:
+                    # Puxa o saldo atual do cliente selecionado (garante que seja o saldo mais recente)
                     saldo_atual = st.session_state.clientes.loc[st.session_state.clientes['Nome'] == cliente_resgate, 'Cashback Disponível'].iloc[0]
                     st.info(f"Saldo Disponível para {cliente_resgate}: R$ {saldo_atual:.2f}")
                     
@@ -326,6 +384,7 @@ with tab1:
                 elif valor_resgate <= 0:
                     st.error("O valor do resgate deve ser maior que zero.")
                 else:
+                    # Se o cliente for selecionado, o saldo_atual será puxado corretamente antes da validação.
                     resgatar_cashback(cliente_resgate, valor_resgate, valor_venda_resgate, data_resgate, saldo_atual)
 
 # --------------------------
@@ -360,7 +419,6 @@ with tab2:
     
     clientes_para_operacao = [''] + st.session_state.clientes['Nome'].tolist()
     
-    # Usa um container para o selectbox e evita que ele desapareça durante a edição
     with st.container(border=True):
         cliente_selecionado_operacao = st.selectbox(
             "Selecione a Cliente para Editar ou Excluir:",
@@ -377,32 +435,27 @@ with tab2:
         
         st.markdown("##### Dados do Cliente Selecionado")
 
-        # --- BOTÕES DE AÇÃO ---
         col_edicao, col_exclusao = st.columns([1, 1])
         
         with col_edicao:
             if st.button("✏️ Editar Cadastro", use_container_width=True, key='btn_editar'):
                 st.session_state.editing_client = cliente_selecionado_operacao
-                st.session_state.deleting_client = False # Cancela qualquer exclusão pendente
+                st.session_state.deleting_client = False 
                 st.rerun() 
         
         with col_exclusao:
             if st.button("🗑️ Excluir Cliente", use_container_width=True, key='btn_excluir', type='primary'):
                 st.session_state.deleting_client = cliente_selecionado_operacao
-                st.session_state.editing_client = False # Cancela qualquer edição pendente
+                st.session_state.editing_client = False 
                 st.rerun() 
         
         st.markdown("---")
         
-        # ------------------
-        # --- MODO DE EDIÇÃO ---
-        # ------------------
         if st.session_state.editing_client == cliente_selecionado_operacao:
             st.subheader(f"Editando: {cliente_selecionado_operacao}")
             
-            # O formulário agora só contém os campos de input e o botão de CONCLUIR EDIÇÃO.
             with st.form("form_edicao_cliente", clear_on_submit=False):
-                # Campos de Edição
+                
                 novo_nome = st.text_input("Nome (Chave de Identificação):", 
                                           value=cliente_data['Nome'], 
                                           key='edicao_nome')
@@ -415,30 +468,20 @@ with tab2:
                                               value=cliente_data['Telefone'], 
                                               key='edicao_telefone')
                 
-                # Exibe o Cashback Disponível (NÃO EDITÁVEL)
                 st.info(f"Cashback Disponível: R$ {cliente_data['Cashback Disponível']:.2f} (Não editável)")
 
-                # Botão de Concluir (DENTRO DO FORM)
                 submitted_edicao = st.form_submit_button("✅ Concluir Edição", use_container_width=True, type="secondary")
             
-            # --- LÓGICA DE SUBMISSÃO (APÓS O FORM) ---
             if submitted_edicao:
-                # Os valores são acessados pelas chaves da sessão (keys do form)
                 editar_cliente(cliente_selecionado_operacao, st.session_state.edicao_nome.strip(), st.session_state.edicao_apelido.strip(), st.session_state.edicao_telefone.strip())
             
-            # --- BOTÃO DE CANCELAR (FORA DO FORM PARA EVITAR O ERRO) ---
-            # Usamos colunas para alinhamento horizontal após o formulário.
             col_concluir_placeholder, col_cancelar = st.columns(2)
             
             with col_cancelar:
-                # O st.button precisa estar fora do st.form
                 if st.button("❌ Cancelar Edição", use_container_width=True, type='primary', key='cancelar_edicao_btn_final'):
                     st.session_state.editing_client = False
                     st.rerun()
         
-        # ------------------
-        # --- MODO DE EXCLUSÃO ---
-        # ------------------
         elif st.session_state.deleting_client == cliente_selecionado_operacao:
             st.error(f"ATENÇÃO: Você está prestes a excluir **{cliente_selecionado_operacao}**.")
             st.warning("Esta ação é irreversível e removerá todos os lançamentos de venda/resgate associados a esta cliente.")
