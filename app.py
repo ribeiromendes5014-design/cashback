@@ -41,6 +41,7 @@ NIVEIS = {
         'proximo_nivel': 'Ouro'
     },
     'Ouro': {
+        # Corrigido: Ouro começa a partir de 200.01.
         'min_gasto': 200.01, 
         'max_gasto': 1000.00, 
         'cashback_normal': 0.07, # 7%
@@ -48,6 +49,7 @@ NIVEIS = {
         'proximo_nivel': 'Diamante'
     },
     'Diamante': {
+        # Corrigido: Diamante começa a partir de 1000.01.
         'min_gasto': 1000.01, 
         'max_gasto': float('inf'), 
         'cashback_normal': 0.15, # 15%
@@ -260,7 +262,7 @@ def carregar_dados(data_version_key): # <-- CHAVE DE VERSÃO ADICIONADA
         st.session_state.clientes = pd.DataFrame(columns=CLIENTES_COLS)
         st.session_state.clientes.loc[0] = ['Cliente Exemplo', 'Primeiro Cliente', '99999-9999', 50.00, 0.00, 'Prata', '', False]
         
-    # FORÇA a conversão de string para o tipo correto para evitar problemas de visualização
+    # FORÇA a conversão de string para o tipo correto
     st.session_state.clientes['Cashback Disponível'] = pd.to_numeric(
         st.session_state.clientes['Cashback Disponível'], errors='coerce'
     ).fillna(0.0)
@@ -300,14 +302,17 @@ def calcular_nivel_e_beneficios(gasto_acumulado: float) -> tuple[str, float, flo
     cb_normal = NIVEIS['Prata']['cashback_normal']
     cb_turbo = NIVEIS['Prata']['cashback_turbo']
     
+    # CORREÇÃO: A lógica de nível usa > ou >= nos limites mínimos (min_gasto)
     if gasto_acumulado >= NIVEIS['Diamante']['min_gasto']:
         nivel = 'Diamante'
         cb_normal = NIVEIS['Diamante']['cashback_normal']
         cb_turbo = NIVEIS['Diamante']['cashback_turbo']
+    # Ouro começa a partir de R$ 200.01 (min_gasto)
     elif gasto_acumulado >= NIVEIS['Ouro']['min_gasto']:
         nivel = 'Ouro'
         cb_normal = NIVEIS['Ouro']['cashback_normal']
         cb_turbo = NIVEIS['Ouro']['cashback_turbo']
+    # Se não atingiu R$ 200.01, permanece Prata
     
     return nivel, cb_normal, cb_turbo
 
@@ -316,9 +321,10 @@ def calcular_falta_para_proximo_nivel(gasto_acumulado: float, nivel_atual: str) 
     if nivel_atual == 'Diamante':
         return 0.0 # Nível máximo
         
-    proximo_nivel_nome = NIVEIS[nivel_atual]['proximo_nivel']
+    # Obtém o nome do próximo nível
+    proximo_nivel_nome = NIVEIS.get(nivel_atual, {}).get('proximo_nivel')
     
-    if proximo_nivel_nome == 'Max':
+    if proximo_nivel_nome == 'Max' or not proximo_nivel_nome:
          return 0.0
 
     proximo_nivel_min = NIVEIS[proximo_nivel_nome]['min_gasto']
@@ -326,7 +332,7 @@ def calcular_falta_para_proximo_nivel(gasto_acumulado: float, nivel_atual: str) 
     if proximo_nivel_min > gasto_acumulado:
         return proximo_nivel_min - gasto_acumulado
     else:
-        return 0.0 # Já atingiu o requisito, mas o nível não foi atualizado (será atualizado na próxima venda)
+        return 0.0 
 
 
 # --- Funções de Manipulação de Produtos Turbo ---
@@ -454,10 +460,11 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
         st.error(f"Erro: Cliente '{cliente_nome}' não encontrado.")
         return
 
+    # IMPORTANTE: Pegar os dados ANTES de atualizar
     cliente_data = st.session_state.clientes.loc[idx_cliente].iloc[0]
     
     # ------------------------------------
-    # 1. ATUALIZAÇÕES DO CLIENTE INDICADO
+    # 1. ATUALIZAÇÕES DO CLIENTE
     # ------------------------------------
     
     # Atualiza o saldo do cliente
@@ -466,7 +473,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     # Atualiza o gasto acumulado
     st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'] += valor_venda
     
-    # Recalcula o Nível com o novo gasto acumulado
+    # Recalcula o Nível com o novo gasto acumulado (CORREÇÃO DE LÓGICA DE NÍVEL)
     novo_gasto_acumulado = st.session_state.clientes.loc[idx_cliente, 'Gasto Acumulado'].iloc[0]
     novo_nivel, _, _ = calcular_nivel_e_beneficios(novo_gasto_acumulado)
     st.session_state.clientes.loc[idx_cliente, 'Nivel Atual'] = novo_nivel
@@ -502,7 +509,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
 
 
     # ------------------------------------
-    # 3. REGISTRA O LANÇAMENTO DO INDICADO
+    # 3. REGISTRA O LANÇAMENTO E SALVA
     # ------------------------------------
     novo_lancamento = pd.DataFrame({
         'Data': [data_venda],
@@ -514,6 +521,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
     })
     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_lancamento], ignore_index=True)
     
+    # SALVA E FORÇA O RECARREGAMENTO DO CACHE PARA ATUALIZAR A TELA
     salvar_dados()  
     st.success(f"Venda de R$ {valor_venda:.2f} lançada para **{cliente_nome}** ({novo_nivel}). Cashback de R$ {valor_cashback:.2f} adicionado.")
 
@@ -529,7 +537,7 @@ def lancar_venda(cliente_nome, valor_venda, valor_cashback, data_venda, venda_tu
         # Pega o NÚMERO TOTAL DE VENDAS
         numero_total_vendas = len(vendas_do_cliente)
         
-        # Obtém o saldo atualizado
+        # Obtém o saldo atualizado (pós-salvamento)
         saldo_atualizado = st.session_state.clientes.loc[
             st.session_state.clientes['Nome'] == cliente_nome, 'Cashback Disponível'
         ].iloc[0]
@@ -763,18 +771,18 @@ def render_lancamento():
         gasto_acumulado = 0.00
         primeira_compra_feita = True 
         
-        # 2. Busca e Calcula Nível/Benefícios
+        # 2. Busca e Calcula Nível/Benefícios (CORRIGIDO: Busca dados atualizados)
         if cliente_selecionado and cliente_selecionado in st.session_state.clientes['Nome'].values:
             cliente_data = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_selecionado].iloc[0]
             gasto_acumulado = cliente_data['Gasto Acumulado']
             primeira_compra_feita = cliente_data['Primeira Compra Feita']
             
-            # Garante que o nível exibido está correto
+            # Recalcula o nível com o gasto acumulado atual
             nivel_cliente, cb_normal_rate, cb_turbo_rate = calcular_nivel_e_beneficios(gasto_acumulado)
 
             # --- Exibição de Nível e Taxas ---
             
-            # Sobrescreve para Indicação
+            # Sobrescreve para Indicação (se for a primeira compra)
             if not primeira_compra_feita and cliente_data['Indicado Por']:
                 taxa_aplicada_ind = CASHBACK_INDICADO_PRIMEIRA_COMPRA
                 st.info(f"✨ **INDICAÇÃO ATIVA!** Cliente na primeira compra com indicação. Cashback de **{int(taxa_aplicada_ind * 100)}%** aplicado.")
@@ -790,6 +798,8 @@ def render_lancamento():
             else:
                 col_info3.metric("Cashback Turbo", "Indisponível")
             
+            # NOVO: Exibe o saldo disponível
+            st.markdown(f"**Saldo de Cashback Disponível:** R$ {cliente_data['Cashback Disponível']:.2f}")
             st.markdown("---") # Separador visual
 
         
@@ -987,14 +997,14 @@ def render_cadastro():
     st.subheader("Novo Cliente")
     
     # ----------------------------------------------
-    # 🟢 PROGRAMA INDIQUE E GANHE (FORA DO FORM PARA REATIVIDADE)
+    # PROGRAMA INDIQUE E GANHE (FORA DO FORM PARA REATIVIDADE)
     # ----------------------------------------------
     
     # Inicializa o estado do checkbox se ainda não existir
     if 'is_indicado_check' not in st.session_state:
          st.session_state.is_indicado_check = False
          
-    # Checkbox para indicar se houve indicação (AGORA FUNCIONAL)
+    # Checkbox para indicar se houve indicação
     st.checkbox(
         "Esta cliente foi indicada por outra?", 
         value=st.session_state.get('is_indicado_check', False), 
@@ -1154,6 +1164,7 @@ def render_cadastro():
         
     st.markdown("---")
     st.subheader("Clientes Cadastrados (Visualização Completa)")
+    # Corrigido: As colunas Gasto Acumulado, Cashback Disponível e Nível Atual serão exibidas corretamente agora
     st.dataframe(st.session_state.clientes.drop(columns=['Primeira Compra Feita']), hide_index=True, use_container_width=True) # Oculta o Booleano
 
 def render_relatorios():
