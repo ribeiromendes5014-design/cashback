@@ -29,7 +29,6 @@ def carregar_dados_github(file_path, df_columns):
         return pd.DataFrame(columns=df_columns)
 
 def salvar_dados_github(file_path, df):
-    """Salva dados usando a conexão GitHub Storage (fazendo um commit)."""
     try:
         conn = st.connection("github", type="experimental_github_storage")
         csv_buffer = io.StringIO()
@@ -44,6 +43,7 @@ def salvar_dados_github(file_path, df):
     except Exception as e:
         st.error(f"ERRO CRÍTICO: Não foi possível salvar '{file_path}' no GitHub. Verifique as permissões do token. Detalhes: {e}")
         return False
+
         
 def carregar_dados():
     """Tenta carregar os DataFrames, priorizando o GitHub se configurado."""
@@ -516,3 +516,4 @@ with tab3:
             st.info("Nenhum lançamento encontrado com os filtros selecionados.")
     else:
         st.info("Nenhum lançamento registrado no histórico.")
+
